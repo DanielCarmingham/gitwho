@@ -1,0 +1,11 @@
+# Rust
+/target/
+
+# Claude Code local (per-machine permissions, not shared)
+.claude/settings.local.json
+
+# Never commit resolved credentials or a real accounts file with values.
+# accounts.toml names variables only (R10) -- but a stray export dump must not
+# slip in.
+*.secret
+.envrc.local
