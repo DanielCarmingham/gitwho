@@ -1,5 +1,7 @@
-# Rust
+# Rust. This machine builds into target.noindex (Spotlight exclusion), not
+# target, so both are listed.
 /target/
+/target.noindex/
 
 # Claude Code local (per-machine permissions, not shared)
 .claude/settings.local.json
@@ -9,4 +11,3 @@
 # slip in.
 *.secret
 .envrc.local
-/target/
