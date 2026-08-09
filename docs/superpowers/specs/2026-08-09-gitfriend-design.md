@@ -38,7 +38,7 @@ in the ambient environment at all.
 |---|---|
 | Form factor | Rust binary + generated shell glue |
 | Isolation | Least-privilege by default; `gitfriend shell-env` as explicit opt-in escape hatch |
-| Secret store | macOS Keychain, behind a pluggable backend trait |
+| Secret store | Pluggable backend trait. **age-encrypted file is the working default**; Keychain is blocked pending code signing — see "Revision" below |
 | v1 providers | GitHub, Gitea/Forgejo (incl. Codeberg), GitLab, Azure DevOps |
 | Non-git creds (AWS, npm) | **Out of scope for v1** |
 | MCP wiring | Rewrite `command` to launch via `gitfriend exec`; resolve from cwd at launch |
@@ -72,6 +72,43 @@ Measured on this machine (git 2.50.1, direnv 2.37.1, gh 2.97.0, jj 0.44.0):
    DanielAtProfound,DanielAtKitchenCloud}`, `GITEA_HOST`, `GITEA_TOKEN`,
    `GITHUB_PAT`, `GITHUB_PAT_PROFOUND`. The last two have no known consumer
    (open question 5) — resolve during migration, do not assume dead.
+
+## Revision 2026-08-09: the secret store
+
+Two measurements taken while building phase 3 overturned the Keychain
+decision. Both are reproducible.
+
+**macOS Keychain blocks on a GUI prompt after every rebuild.** macOS keys a
+Keychain ACL to the calling binary's designated requirement; for an unsigned
+binary that is its code hash. Writing an entry with one build and reading it
+with the next hung indefinitely until killed. The credential helper runs on
+every git transport operation, so this fails R15 outright. `codesign` itself
+then blocked on a second prompt for the signing key, so the "sign it with a
+stable identity" fix is *plausible but unverified* — `examples/keychain_probe.rs`
+is how to confirm it.
+
+**age's passphrase mode is far too slow.** scrypt is deliberately expensive:
+measured at **1.53 s per read**, against a budget in milliseconds. Switching to
+an x25519 identity removes the KDF entirely and brings a read under a
+millisecond — the test suite went from 3.05 s to 0.00 s. A regression test now
+pins reads under 100 ms so a KDF cannot creep back in.
+
+**Consequence.** `AgeFileBackend` is the working default: one age-encrypted
+file, unlocked by an identity key file, both `0600`. `KeychainBackend` stays
+implemented and behind the same trait, gated on the signing question being
+settled.
+
+Worth being straight about what this protects. An identity key on disk means
+anything that can read that file can decrypt the secrets, so this defends the
+secrets at rest — a backup, a sync folder, an accidental commit — not against a
+local process. The cross-project exposure this project set out to fix comes
+from **on-demand fetching instead of ambient environment variables**, and that
+holds for either backend. Encryption at rest is the increment the Keychain was
+buying, and it is the part now deferred.
+
+A future option worth noting: `age-plugin-se` encrypts to Apple's Secure
+Enclave, which would give hardware-backed keys without the per-binary ACL
+problem.
 
 ## Architecture
 
