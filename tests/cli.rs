@@ -316,3 +316,38 @@ fn a_generated_shim_routes_a_cli_through_exec() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn exec_works_in_a_third_party_clone_but_says_so() {
+    // The real case: ~12 clones of other people's repos sit under this
+    // machine's personal root. `gh` should still work in them, using the
+    // default account -- and should mention that nothing claimed the remote,
+    // since that is also what a forgotten pattern looks like.
+    let dir = tempfile::tempdir().unwrap();
+    exec_fixture(dir.path());
+    let repo = repo_for(
+        dir.path(),
+        "someone-elses-repo",
+        "https://github.com/microsoft/vscode.git",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+        .args(["exec", "--", "/usr/bin/env"])
+        .current_dir(&repo)
+        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
+        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "exec should not fail in an unclaimed clone");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("GH_TOKEN=personal-token"),
+        "the default account's token should be used"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("no account claims"),
+        "the fallback should be stated, not silent; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

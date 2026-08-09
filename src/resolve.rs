@@ -38,6 +38,14 @@ pub enum Reason {
     OriginUrl,
     /// The repo has no remote; matched a directory prefix instead.
     PathFallback,
+    /// The repo has a remote, but no account claims it -- a third-party clone,
+    /// or an org nobody has declared yet.
+    ///
+    /// Distinct from [`Default`](Reason::Default) on purpose. Both land on the
+    /// declared default account, but this one means "we looked and found
+    /// nothing", which is also what a *forgotten* pattern looks like. Callers
+    /// that are about to release a credential must treat it as low confidence.
+    Unmatched,
     /// Nothing matched, so the explicitly declared default account was used.
     /// Callers must treat this as low confidence: it is the only outcome that
     /// can be right by luck rather than by evidence.
@@ -48,6 +56,23 @@ pub enum Reason {
 pub struct Resolved<'a> {
     pub account: &'a Account,
     pub reason: Reason,
+}
+
+impl<'a> Resolved<'a> {
+    fn with_reason(self, reason: Reason) -> Self {
+        Self { reason, ..self }
+    }
+}
+
+impl Reason {
+    /// Whether this answer is firm enough to release a credential on.
+    ///
+    /// `Default` and `Unmatched` both land on the declared default account
+    /// without anything having identified it, so a token handed over on either
+    /// basis is right only by luck (R8).
+    pub fn identifies_an_account(self) -> bool {
+        !matches!(self, Reason::Default | Reason::Unmatched)
+    }
 }
 
 /// Reduce a remote URL to the `host/path` form that patterns are written
@@ -86,21 +111,34 @@ fn normalize(url: &str) -> String {
 /// follow the remote you actually push to without ambiguity.
 pub fn resolve_repo<'a>(config: &'a Config, dir: &Path) -> Result<Resolved<'a>, ResolveError> {
     if let Some(url) = git::origin_url(dir) {
-        let resolved = resolve_url(config, &url)?;
-        return Ok(Resolved {
-            account: resolved.account,
-            reason: Reason::OriginUrl,
-        });
+        return match resolve_url(config, &url) {
+            Ok(resolved) => Ok(Resolved {
+                account: resolved.account,
+                reason: Reason::OriginUrl,
+            }),
+            // Nobody claims this remote. Fall back, but say so: erroring would
+            // break every third-party clone, while a silent fall-back would
+            // make a forgotten pattern indistinguishable from a deliberate
+            // one.
+            Err(ResolveError::NoMatch(_)) => {
+                Ok(default_account(config)?.with_reason(Reason::Unmatched))
+            }
+            // Ambiguity is different in kind: there *is* a right answer and we
+            // cannot tell which, so falling back would be guessing.
+            Err(other) => Err(other),
+        };
     }
 
     if let Some(resolved) = resolve_path(config, dir) {
         return Ok(resolved);
     }
 
+    Ok(default_account(config)?.with_reason(Reason::Default))
+}
+
+fn default_account(config: &Config) -> Result<Resolved<'_>, ResolveError> {
     let account = config
-        .accounts
-        .iter()
-        .find(|a| a.name == config.defaults.account)
+        .account(&config.defaults.account)
         .ok_or_else(|| ResolveError::UnknownDefault(config.defaults.account.clone()))?;
 
     Ok(Resolved {

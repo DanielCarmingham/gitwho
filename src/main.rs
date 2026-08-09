@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use gitfriend::config::Config;
 use gitfriend::credential::{respond, Request};
 use gitfriend::exec::plan_env;
-use gitfriend::resolve::resolve_repo;
+use gitfriend::resolve::{resolve_repo, Reason};
 use gitfriend::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend};
 
 #[derive(Parser)]
@@ -279,13 +279,21 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
         Some(name) => config
             .account(name)
             .ok_or_else(|| format!("no account named {name:?}"))?,
-        // Unlike the credential path, a Default resolution is allowed here:
-        // running `gh` outside any repo should use the declared default, and
-        // refusing would be hostile rather than safe. A repo whose remote
-        // matches nothing still errors rather than falling back.
-        None => resolve_repo(&config, &cwd)
-            .map_err(|e| e.to_string())?
-            .account,
+        // Unlike the credential path, a low-confidence resolution is allowed
+        // here: running `gh` outside any repo, or inside a third-party clone,
+        // should use the declared default. Refusing would be hostile rather
+        // than safe. It is still said out loud, because an unclaimed remote is
+        // also what a forgotten pattern looks like.
+        None => {
+            let resolved = resolve_repo(&config, &cwd).map_err(|e| e.to_string())?;
+            if resolved.reason == Reason::Unmatched {
+                eprintln!(
+                    "gitfriend: no account claims this repository's remote; using {}",
+                    resolved.account.name
+                );
+            }
+            resolved.account
+        }
     };
 
     let plan = plan_env(&config, &backend, account).map_err(|e| e.to_string())?;

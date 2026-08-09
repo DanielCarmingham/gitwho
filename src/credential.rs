@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use crate::config::{Account, Config};
-use crate::resolve::{self, Reason};
+use crate::resolve;
 use crate::secrets::Backend;
 
 #[derive(Debug, thiserror::Error)]
@@ -134,7 +134,7 @@ fn choose_account<'a>(
     // as your usual self in a scratch repo is harmless. It is not a reasonable
     // basis for releasing a *credential*: nothing here identified the account,
     // so a token handed over now is right only by luck (R8).
-    if resolved.reason == Reason::Default {
+    if !resolved.reason.identifies_an_account() {
         return Err(CredentialError::LowConfidence {
             account: resolved.account.name.clone(),
         });

@@ -160,3 +160,36 @@ fn a_low_confidence_resolution_does_not_release_a_token() {
         "a token leaked on a low-confidence resolution: {message}"
     );
 }
+
+#[test]
+fn an_unmatched_remote_does_not_release_a_token_either() {
+    // A third-party clone resolves to the default account so `gh` still works
+    // there -- but that is not a basis for handing over a credential, and an
+    // unmatched remote is also what a forgotten pattern looks like (R8, R11).
+    let dir = tempfile::tempdir().unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(dir.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["remote", "add", "origin", "https://github.com/microsoft/vscode.git"])
+        .current_dir(dir.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .unwrap();
+
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let request = Request::parse("protocol=https\n");
+
+    let error = respond(&config, &backend(), &request, Some(dir.path()))
+        .expect_err("an unmatched remote must not release a token");
+
+    assert!(
+        !error.to_string().contains("personal-token"),
+        "a token leaked on an unmatched remote: {error}"
+    );
+}
