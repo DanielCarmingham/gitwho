@@ -2,12 +2,14 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::ExitCode;
+use std::process::{self, ExitCode};
 
 use clap::{Parser, Subcommand};
 
 use gitfriend::config::Config;
 use gitfriend::credential::{respond, Request};
+use gitfriend::exec::plan_env;
+use gitfriend::resolve::resolve_repo;
 use gitfriend::secrets::AgeFileBackend;
 
 #[derive(Parser)]
@@ -28,6 +30,39 @@ enum Command {
         /// `get`, `store`, or `erase` -- supplied by git.
         operation: String,
     },
+
+    /// Run a command with exactly one account's credentials.
+    ///
+    /// Variables managed by any account are cleared first, then the resolved
+    /// account's are set, so nothing inherited from the shell survives:
+    ///     gitfriend exec -- gh pr list
+    Exec {
+        /// Use this account instead of resolving one from the current repo.
+        #[arg(long)]
+        account: Option<String>,
+        /// The command to run, after `--`.
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
+
+    /// Manage wrapper scripts that route a CLI through `exec`.
+    Shim {
+        #[command(subcommand)]
+        action: ShimAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShimAction {
+    /// Write a shim for each named CLI.
+    Install {
+        /// Directory to write shims into. Put it early on PATH.
+        #[arg(long)]
+        dir: PathBuf,
+        /// CLI names to wrap, e.g. `gh tea`.
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -35,7 +70,81 @@ fn main() -> ExitCode {
 
     match cli.command {
         Command::Credential { operation } => credential(&operation),
+        Command::Shim { action } => match shim(action) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Exec { account, command } => match exec(account.as_deref(), &command) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
     }
+}
+
+fn shim(action: ShimAction) -> Result<(), String> {
+    match action {
+        ShimAction::Install { dir, names } => {
+            let path_var = std::env::var("PATH").unwrap_or_default();
+            for name in &names {
+                let written = gitfriend::shim::install(name, &dir, &path_var)
+                    .map_err(|e| e.to_string())?;
+                println!("{}", written.display());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, String> {
+    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
+    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
+        .map_err(|e| e.to_string())?;
+
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+
+    let account = match account_name {
+        Some(name) => config
+            .account(name)
+            .ok_or_else(|| format!("no account named {name:?}"))?,
+        // Unlike the credential path, a Default resolution is allowed here:
+        // running `gh` outside any repo should use the declared default, and
+        // refusing would be hostile rather than safe. A repo whose remote
+        // matches nothing still errors rather than falling back.
+        None => resolve_repo(&config, &cwd)
+            .map_err(|e| e.to_string())?
+            .account,
+    };
+
+    let plan = plan_env(&config, &backend, account).map_err(|e| e.to_string())?;
+
+    let (program, args) = command.split_first().expect("clap requires a command");
+    let mut child = process::Command::new(program);
+    child.args(args);
+
+    // Clear everything managed before setting anything, so a variable an
+    // account does not declare cannot survive from the parent (R11).
+    for var in &plan.remove {
+        child.env_remove(var);
+    }
+    for (var, value) in &plan.set {
+        child.env(var, value);
+    }
+
+    let status = child
+        .status()
+        .map_err(|e| format!("cannot run {program}: {e}"))?;
+
+    Ok(match status.code() {
+        Some(0) => ExitCode::SUCCESS,
+        Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+        None => ExitCode::FAILURE,
+    })
 }
 
 fn credential(operation: &str) -> ExitCode {

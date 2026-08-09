@@ -175,3 +175,144 @@ fn an_unclaimed_host_gets_no_credential_from_the_real_binary() {
     );
     assert!(!output.status.success(), "git should not have succeeded");
 }
+
+// --- exec -------------------------------------------------------------------
+
+const EXEC_ACCOUNTS: &str = r#"
+    [defaults]
+    account = "Personal"
+
+    [[accounts]]
+    name = "Personal"
+    provider = "github"
+    email = "me@example.com"
+    gitAuth = "https"
+    gitCredential = "GH_TOKEN"
+    match = ["github.com/Personal/**"]
+    env = ["GH_TOKEN"]
+
+    [[accounts]]
+    name = "Digilope"
+    provider = "gitea"
+    email = "me@digilope.example"
+    gitAuth = "ssh"
+    match = ["app-gitea.digilope.com/**"]
+    env = ["GITEA_TOKEN"]
+"#;
+
+fn exec_fixture(dir: &Path) {
+    std::fs::write(dir.join("accounts.toml"), EXEC_ACCOUNTS).unwrap();
+    let key_path = dir.join("identity.key");
+    AgeFileBackend::generate_identity_file(&key_path).unwrap();
+    let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
+    backend.set("Personal", "GH_TOKEN", "personal-token").unwrap();
+    backend.set("Digilope", "GITEA_TOKEN", "gitea-token").unwrap();
+}
+
+fn repo_for(dir: &Path, name: &str, origin: &str) -> std::path::PathBuf {
+    let repo = dir.join(name);
+    std::fs::create_dir(&repo).unwrap();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["remote", "add", "origin", origin],
+    ] {
+        Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap();
+    }
+    repo
+}
+
+#[test]
+fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
+    // The scenario the project exists for: a GitHub token is already loaded in
+    // the shell, and a Gitea tool is launched. The child must not see it (R11).
+    let dir = tempfile::tempdir().unwrap();
+    exec_fixture(dir.path());
+    let repo = repo_for(
+        dir.path(),
+        "digilope-repo",
+        "gitea@app-gitea.digilope.com:daniel/site.git",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+        .args(["exec", "--", "/usr/bin/env"])
+        .current_dir(&repo)
+        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
+        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env("GH_TOKEN", "hostile-github-token")
+        .output()
+        .unwrap();
+
+    let env_out = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !env_out.contains("hostile-github-token"),
+        "a GitHub token leaked into a Gitea process; env=\n{env_out}"
+    );
+    assert!(
+        env_out.contains("GITEA_TOKEN=gitea-token"),
+        "the Gitea token was not injected; env=\n{env_out}\nstderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_generated_shim_routes_a_cli_through_exec() {
+    // Shims are how tools that read environment variables get covered without
+    // wrapping every call site by hand. Using `env` as the stand-in CLI lets
+    // the test see exactly what the wrapped process received.
+    let dir = tempfile::tempdir().unwrap();
+    exec_fixture(dir.path());
+    let repo = repo_for(
+        dir.path(),
+        "digilope-repo",
+        "gitea@app-gitea.digilope.com:daniel/site.git",
+    );
+    let shim_dir = dir.path().join("shims");
+
+    let install = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+        .args(["shim", "install", "--dir"])
+        .arg(&shim_dir)
+        .arg("env")
+        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .output()
+        .unwrap();
+    assert!(
+        install.status.success(),
+        "shim install failed: {}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+
+    let output = Command::new(shim_dir.join("env"))
+        .current_dir(&repo)
+        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
+        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env("GH_TOKEN", "hostile-github-token")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                shim_dir.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+
+    let env_out = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !env_out.contains("hostile-github-token"),
+        "the shim did not scrub an inherited token; env=\n{env_out}"
+    );
+    assert!(
+        env_out.contains("GITEA_TOKEN=gitea-token"),
+        "the shim did not inject the account's token; env=\n{env_out}\nstderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

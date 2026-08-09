@@ -53,6 +53,11 @@ pub struct Account {
     /// Glob patterns matched against `host/path` of a remote URL.
     #[serde(rename = "match", default)]
     pub match_patterns: Vec<String>,
+    /// Variables this account's CLIs and MCP servers need. A bare `VAR` names
+    /// a secret to fetch; `VAR=value` is a literal, for non-secret settings
+    /// such as an API host.
+    #[serde(default)]
+    pub env: Vec<String>,
     /// Directory prefixes claimed by this account, consulted **only** for a
     /// repo that has no remote yet. Everything else resolves by URL, so a
     /// relocated clone is unaffected by these.
@@ -63,6 +68,10 @@ pub struct Account {
 impl Config {
     pub fn parse(toml_str: &str) -> Result<Self, ConfigError> {
         Ok(toml::from_str(toml_str)?)
+    }
+
+    pub fn account(&self, name: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.name == name)
     }
 
     pub fn load(path: &std::path::Path) -> Result<Self, ConfigError> {
