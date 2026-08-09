@@ -1,7 +1,5 @@
-# Rust. This machine builds into target.noindex (Spotlight exclusion), not
-# target, so both are listed.
+# Rust
 /target/
-/target.noindex/
 
 # Claude Code local (per-machine permissions, not shared)
 .claude/settings.local.json
