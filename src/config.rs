@@ -65,6 +65,35 @@ pub struct Account {
     pub paths: Vec<String>,
 }
 
+impl Account {
+    /// The variables this account needs a stored value for.
+    ///
+    /// Literal `VAR=value` entries are excluded -- they carry their own value
+    /// and are not secrets. The git credential variable is included even if it
+    /// is not repeated in `env`, since it still needs a value to exist.
+    /// Deduplicated, because declaring it in both places is natural.
+    pub fn secret_vars(&self) -> Vec<&str> {
+        let mut vars: Vec<&str> = Vec::new();
+
+        for spec in &self.env {
+            if spec.contains('=') {
+                continue;
+            }
+            if !vars.contains(&spec.as_str()) {
+                vars.push(spec);
+            }
+        }
+
+        if let Some(var) = &self.git_credential {
+            if !vars.contains(&var.as_str()) {
+                vars.push(var);
+            }
+        }
+
+        vars
+    }
+}
+
 impl Config {
     pub fn parse(toml_str: &str) -> Result<Self, ConfigError> {
         Ok(toml::from_str(toml_str)?)

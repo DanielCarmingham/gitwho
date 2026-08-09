@@ -10,7 +10,7 @@ use gitfriend::config::Config;
 use gitfriend::credential::{respond, Request};
 use gitfriend::exec::plan_env;
 use gitfriend::resolve::resolve_repo;
-use gitfriend::secrets::AgeFileBackend;
+use gitfriend::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend};
 
 #[derive(Parser)]
 #[command(name = "gitfriend", version, about = "Per-repository git identity and credentials")]
@@ -45,10 +45,38 @@ enum Command {
         command: Vec<String>,
     },
 
+    /// Store and inspect token values.
+    Secret {
+        #[command(subcommand)]
+        action: SecretAction,
+    },
+
     /// Manage wrapper scripts that route a CLI through `exec`.
     Shim {
         #[command(subcommand)]
         action: ShimAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SecretAction {
+    /// Create the identity key that unlocks the secrets file.
+    Init,
+    /// Store a value, read from stdin.
+    ///
+    /// The value is never an argument: anything in argv is readable by every
+    /// process on the machine through `ps`.
+    Set { account: String, var: String },
+    /// Show every declared secret as a fingerprint, or as missing.
+    List,
+    /// Remove a stored value.
+    Delete { account: String, var: String },
+    /// Copy values in from `<VAR>_<Account>` environment variables.
+    Import {
+        /// Read from this process's environment -- run it from a shell that
+        /// has the old exports loaded.
+        #[arg(long)]
+        from_env: bool,
     },
 }
 
@@ -70,6 +98,13 @@ fn main() -> ExitCode {
 
     match cli.command {
         Command::Credential { operation } => credential(&operation),
+        Command::Secret { action } => match secret(action) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Shim { action } => match shim(action) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -84,6 +119,98 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+fn secret(action: SecretAction) -> Result<(), String> {
+    if matches!(action, SecretAction::Init) {
+        AgeFileBackend::generate_identity_file(&identity_path()).map_err(|e| e.to_string())?;
+        println!("created {}", identity_path().display());
+        return Ok(());
+    }
+
+    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
+    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
+        .map_err(|e| e.to_string())?;
+
+    match action {
+        SecretAction::Init => unreachable!("handled above"),
+
+        SecretAction::Set { account, var } => {
+            let mut value = String::new();
+            std::io::stdin()
+                .read_to_string(&mut value)
+                .map_err(|e| format!("cannot read the value from stdin: {e}"))?;
+
+            // A trailing newline from `echo` or a heredoc would be sent as
+            // part of the token and rejected by the server, with an error that
+            // says nothing about whitespace.
+            let value = value.trim_end_matches(['\n', '\r']);
+            if value.is_empty() {
+                return Err("no value on stdin".to_string());
+            }
+
+            backend
+                .set(&account, &var, value)
+                .map_err(|e| e.to_string())?;
+            println!("stored {account}/{var} ({})", fingerprint(value));
+            Ok(())
+        }
+
+        SecretAction::Delete { account, var } => {
+            backend
+                .delete(&account, &var)
+                .map_err(|e| e.to_string())?;
+            println!("deleted {account}/{var}");
+            Ok(())
+        }
+
+        SecretAction::List => {
+            println!("{:<24} {:<16} FINGERPRINT", "ACCOUNT", "VARIABLE");
+            for account in &config.accounts {
+                for var in account.secret_vars() {
+                    let status = match backend.get(&account.name, var).map_err(|e| e.to_string())? {
+                        // Only ever the fingerprint (R10).
+                        Some(value) => fingerprint(&value),
+                        None => "MISSING".to_string(),
+                    };
+                    println!("{:<24} {:<16} {}", account.name, var, status);
+                }
+            }
+            Ok(())
+        }
+
+        SecretAction::Import { from_env } => {
+            if !from_env {
+                return Err("specify a source, e.g. --from-env".to_string());
+            }
+
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let source = EnvBackend::from_map(env);
+            let mut imported = 0;
+
+            for account in &config.accounts {
+                for var in account.secret_vars() {
+                    let Some(value) = source.get(&account.name, var).map_err(|e| e.to_string())?
+                    else {
+                        continue;
+                    };
+                    backend
+                        .set(&account.name, var, &value)
+                        .map_err(|e| e.to_string())?;
+                    println!("imported {}/{var} ({})", account.name, fingerprint(&value));
+                    imported += 1;
+                }
+            }
+
+            if imported == 0 {
+                return Err(
+                    "found no <VAR>_<Account> variables to import; run this from a shell that has them loaded"
+                        .to_string(),
+                );
+            }
+            Ok(())
+        }
     }
 }
 
