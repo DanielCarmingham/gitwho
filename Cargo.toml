@@ -1,0 +1,21 @@
+[package]
+name = "gitfriend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "gitfriend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gitfriend"
+path = "src/main.rs"
+
+[dependencies]
+globset = "0.4"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
