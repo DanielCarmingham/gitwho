@@ -4,10 +4,17 @@
 //! *why* it chose an account is exactly the silent-wrong-answer failure this
 //! project exists to remove (R8).
 
+use std::path::Path;
+
 use crate::config::{Account, Config};
+use crate::git;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    #[error("{0} has no origin remote")]
+    NoOrigin(std::path::PathBuf),
+    #[error("defaults.account names {0}, which is not a declared account")]
+    UnknownDefault(String),
     #[error("no account matches {0}")]
     NoMatch(String),
     #[error("{url} matches {} accounts equally well ({}); pin one with a more specific pattern", accounts.len(), accounts.join(", "))]
@@ -27,6 +34,14 @@ pub enum ResolveError {
 pub enum Reason {
     /// Matched a remote URL against the account's patterns.
     UrlMatch,
+    /// Matched the repo's `origin` remote against the account's patterns.
+    OriginUrl,
+    /// The repo has no remote; matched a directory prefix instead.
+    PathFallback,
+    /// Nothing matched, so the explicitly declared default account was used.
+    /// Callers must treat this as low confidence: it is the only outcome that
+    /// can be right by luck rather than by evidence.
+    Default,
 }
 
 #[derive(Debug)]
@@ -61,6 +76,68 @@ fn normalize(url: &str) -> String {
     };
 
     rest.trim_end_matches('/').to_string()
+}
+
+/// Resolve the account owning the repo that contains `dir`.
+///
+/// Only `origin` is consulted. A fork whose `upstream` belongs to another
+/// account still authenticates correctly when fetching from it, because the
+/// credential helper resolves per-URL at transport time -- so identity can
+/// follow the remote you actually push to without ambiguity.
+pub fn resolve_repo<'a>(config: &'a Config, dir: &Path) -> Result<Resolved<'a>, ResolveError> {
+    if let Some(url) = git::origin_url(dir) {
+        let resolved = resolve_url(config, &url)?;
+        return Ok(Resolved {
+            account: resolved.account,
+            reason: Reason::OriginUrl,
+        });
+    }
+
+    if let Some(resolved) = resolve_path(config, dir) {
+        return Ok(resolved);
+    }
+
+    let account = config
+        .accounts
+        .iter()
+        .find(|a| a.name == config.defaults.account)
+        .ok_or_else(|| ResolveError::UnknownDefault(config.defaults.account.clone()))?;
+
+    Ok(Resolved {
+        account,
+        reason: Reason::Default,
+    })
+}
+
+/// Longest-prefix match of `dir` against the accounts' `paths`.
+///
+/// Longest wins so a nested root (KitchenCloud inside Profound) beats the root
+/// containing it, without depending on declaration order.
+fn resolve_path<'a>(config: &'a Config, dir: &Path) -> Option<Resolved<'a>> {
+    // Temp dirs and symlinked roots differ between the configured spelling and
+    // the real path, so compare canonical forms.
+    let target = dir.canonicalize().ok()?;
+    let mut best: Option<(usize, &Account)> = None;
+
+    for account in &config.accounts {
+        for prefix in &account.paths {
+            let Ok(prefix) = Path::new(prefix).canonicalize() else {
+                continue;
+            };
+            if !target.starts_with(&prefix) {
+                continue;
+            }
+            let depth = prefix.components().count();
+            if best.is_none_or(|(best_depth, _)| depth > best_depth) {
+                best = Some((depth, account));
+            }
+        }
+    }
+
+    best.map(|(_, account)| Resolved {
+        account,
+        reason: Reason::PathFallback,
+    })
 }
 
 /// How specific a pattern is: the number of characters it pins down literally.

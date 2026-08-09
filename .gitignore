@@ -9,3 +9,4 @@
 # slip in.
 *.secret
 .envrc.local
+/target/

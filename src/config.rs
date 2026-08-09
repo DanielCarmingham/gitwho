@@ -38,6 +38,11 @@ pub struct Account {
     /// Glob patterns matched against `host/path` of a remote URL.
     #[serde(rename = "match", default)]
     pub match_patterns: Vec<String>,
+    /// Directory prefixes claimed by this account, consulted **only** for a
+    /// repo that has no remote yet. Everything else resolves by URL, so a
+    /// relocated clone is unaffected by these.
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 impl Config {
