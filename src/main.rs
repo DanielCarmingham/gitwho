@@ -48,6 +48,12 @@ enum Command {
     /// Report whether the wiring is coherent. Read-only; changes nothing.
     Doctor,
 
+    /// Route provider MCP servers through `exec`.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
     /// Store and inspect token values.
     Secret {
         #[command(subcommand)]
@@ -58,6 +64,23 @@ enum Command {
     Shim {
         #[command(subcommand)]
         action: ShimAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Rewrite `.mcp.json` so provider servers launch through `exec`.
+    ///
+    /// Prints what it would change and stops, unless `--write` is given: these
+    /// files are usually committed, so an accidental rewrite is a diff someone
+    /// has to review.
+    Sync {
+        /// `.mcp.json` files to process.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Apply the changes instead of only reporting them.
+        #[arg(long)]
+        write: bool,
     },
 }
 
@@ -102,6 +125,13 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Credential { operation } => credential(&operation),
         Command::Doctor => match doctor_report() {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Mcp { action } => match mcp(action) {
             Ok(code) => code,
             Err(message) => {
                 eprintln!("gitfriend: {message}");
@@ -158,6 +188,45 @@ fn doctor_report() -> Result<ExitCode, String> {
         println!();
         println!("doctor found problems; nothing was changed");
         return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn mcp(action: McpAction) -> Result<ExitCode, String> {
+    let McpAction::Sync { paths, write } = action;
+
+    let gitfriend = std::env::current_exe()
+        .map_err(|e| format!("cannot find my own path: {e}"))?
+        .to_string_lossy()
+        .into_owned();
+
+    let mut any_changes = false;
+
+    for path in &paths {
+        let original = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+
+        let (rewritten, changed) =
+            gitfriend::mcp::wrap(&original, &gitfriend).map_err(|e| format!("{}: {e}", path.display()))?;
+
+        if changed.is_empty() {
+            println!("{}: nothing to change", path.display());
+            continue;
+        }
+        any_changes = true;
+
+        if write {
+            std::fs::write(path, rewritten)
+                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+            println!("{}: wrapped {}", path.display(), changed.join(", "));
+        } else {
+            println!("{}: would wrap {}", path.display(), changed.join(", "));
+        }
+    }
+
+    if any_changes && !write {
+        println!();
+        println!("nothing was written; re-run with --write to apply");
     }
     Ok(ExitCode::SUCCESS)
 }
