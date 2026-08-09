@@ -12,7 +12,6 @@ const ACCOUNTS: &str = r#"
     name = "Personal"
     provider = "github"
     email = "me@example.com"
-    gitAuth = "https"
     gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
 
@@ -20,7 +19,6 @@ const ACCOUNTS: &str = r#"
     name = "Work"
     provider = "github"
     email = "me@work.example"
-    gitAuth = "https"
     gitCredential = "GH_TOKEN"
     match = ["github.com/WorkOrg/**"]
 "#;
@@ -101,7 +99,6 @@ const SSH_ACCOUNT: &str = r#"
     name = "Personal"
     provider = "github"
     email = "me@example.com"
-    gitAuth = "https"
     gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
 
@@ -109,7 +106,6 @@ const SSH_ACCOUNT: &str = r#"
     name = "Digilope"
     provider = "gitea"
     email = "me@digilope.example"
-    gitAuth = "ssh"
     match = ["app-gitea.digilope.com/**"]
 "#;
 

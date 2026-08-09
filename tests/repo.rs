@@ -12,14 +12,12 @@ const TWO_GITHUB_ACCOUNTS: &str = r#"
     name = "Personal"
     provider = "github"
     email = "me@example.com"
-    gitAuth = "https"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
     email = "me@work.example"
-    gitAuth = "https"
     match = ["github.com/WorkOrg/**"]
 "#;
 
@@ -100,14 +98,12 @@ fn accounts_with_path_rule(root: &Path) -> String {
         name = "Personal"
         provider = "github"
         email = "me@example.com"
-        gitAuth = "https"
         match = ["github.com/Personal/**"]
 
         [[accounts]]
         name = "Work"
         provider = "github"
         email = "me@work.example"
-        gitAuth = "https"
         match = ["github.com/WorkOrg/**"]
         paths = ["{}"]
     "#,
@@ -201,14 +197,12 @@ fn an_ambiguous_remote_is_still_an_error_not_a_fallback() {
         name = "Personal"
         provider = "github"
         email = "me@example.com"
-        gitAuth = "https"
         match = ["github.com/Shared/**"]
 
         [[accounts]]
         name = "Work"
         provider = "github"
         email = "me@work.example"
-        gitAuth = "https"
         match = ["github.com/Shared/**"]
     "#,
     )

@@ -170,6 +170,7 @@ fn doctor_report() -> Result<ExitCode, String> {
     let ambient: std::collections::BTreeMap<String, String> = std::env::vars().collect();
     let wiring = gitfriend::doctor::GitWiring {
         credential_helpers: gitfriend::git::credential_helpers(),
+        github_helper: gitfriend::git::credential_helper_for("https://github.com"),
         use_http_path: gitfriend::git::use_http_path_for_github(),
     };
 

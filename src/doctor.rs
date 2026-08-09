@@ -40,8 +40,15 @@ impl Finding {
 /// The parts of git's configuration that decide whether gitfriend is reachable.
 #[derive(Debug, Default)]
 pub struct GitWiring {
-    /// Every configured `credential.helper`, in order.
+    /// The `credential.helper` values in effect globally, resets already
+    /// applied.
     pub credential_helpers: Vec<String>,
+    /// The helper git resolves for `https://github.com`.
+    ///
+    /// Checked separately because a `[credential "https://github.com"]`
+    /// section overrides the general list entirely -- so a correct global
+    /// helper can still be bypassed for the host that matters most here.
+    pub github_helper: Option<String>,
     /// `credential.useHttpPath` for github.com. `None` means unset.
     pub use_http_path: Option<bool>,
 }
@@ -164,24 +171,35 @@ fn check_ambient(config: &Config, env: &BTreeMap<String, String>, findings: &mut
 }
 
 fn check_git_wiring(git: &GitWiring, findings: &mut Vec<Finding>) {
-    let wired = git
-        .credential_helpers
-        .iter()
-        .any(|helper| helper.contains("gitfriend"));
-
-    if !wired {
-        findings.push(Finding::new(
+    // What github.com resolves to is the question that decides whether
+    // gitfriend is reached at all, because a URL-scoped section wins outright.
+    match &git.github_helper {
+        Some(helper) if helper.contains("gitfriend") => {}
+        Some(helper) => findings.push(Finding::new(
             Level::Problem,
             "git",
-            format!(
-                "credential.helper does not mention gitfriend (found: {})",
-                if git.credential_helpers.is_empty() {
-                    "nothing".to_string()
-                } else {
-                    git.credential_helpers.join(", ")
-                }
-            ),
-        ));
+            format!("github.com is served by {helper}, not gitfriend"),
+        )),
+        None => {
+            let wired = git
+                .credential_helpers
+                .iter()
+                .any(|helper| helper.contains("gitfriend"));
+            if !wired {
+                findings.push(Finding::new(
+                    Level::Problem,
+                    "git",
+                    format!(
+                        "credential.helper does not mention gitfriend (in effect: {})",
+                        if git.credential_helpers.is_empty() {
+                            "nothing".to_string()
+                        } else {
+                            git.credential_helpers.join(", ")
+                        }
+                    ),
+                ));
+            }
+        }
     }
 
     match git.use_http_path {

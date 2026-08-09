@@ -12,7 +12,6 @@ const ACCOUNTS: &str = r#"
     name = "Personal"
     provider = "github"
     email = "me@example.com"
-    gitAuth = "https"
     gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
     env = ["GH_TOKEN"]
@@ -21,7 +20,6 @@ const ACCOUNTS: &str = r#"
     name = "Digilope"
     provider = "gitea"
     email = "me@digilope.example"
-    gitAuth = "ssh"
     match = ["app-gitea.digilope.com/**"]
     env = ["GITEA_TOKEN", "GITEA_HOST=https://app-gitea.digilope.com/api/v1"]
 "#;

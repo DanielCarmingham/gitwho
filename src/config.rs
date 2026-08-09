@@ -39,17 +39,26 @@ pub struct Account {
     pub name: String,
     pub provider: String,
     pub email: String,
-    #[serde(rename = "gitAuth")]
-    pub git_auth: String,
     /// Which declared variable holds the token git should authenticate with.
     ///
-    /// Named explicitly rather than inferred from the provider: an account
-    /// may hold several credentials, and guessing which one is the git
-    /// password is exactly the kind of implicit behaviour that goes wrong
-    /// quietly. Absent for `gitAuth = "ssh"` accounts, which authenticate with
-    /// a key and need no token in the transport path at all (R7).
+    /// Named explicitly rather than inferred from the provider: an account may
+    /// hold several credentials, and guessing which one is the git password is
+    /// the kind of implicit behaviour that goes wrong quietly.
+    ///
+    /// Absent when the account never uses https, which is how R7 is honoured:
+    /// a key-authenticated account is not made to invent a token. Transport is
+    /// deliberately NOT declared per account -- git chooses it per remote, and
+    /// a credential helper is only ever consulted for https, so an account
+    /// using both (as Digilope does, over two hostnames) needs no special
+    /// case.
     #[serde(rename = "gitCredential", default)]
     pub git_credential: Option<String>,
+    /// The ssh key for remotes that use it, written into `core.sshcommand`.
+    ///
+    /// Independent of `gitCredential`: an account may have both, either, or
+    /// neither.
+    #[serde(rename = "sshKey", default)]
+    pub ssh_key: Option<String>,
     /// Glob patterns matched against `host/path` of a remote URL.
     #[serde(rename = "match", default)]
     pub match_patterns: Vec<String>,

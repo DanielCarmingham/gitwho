@@ -12,7 +12,6 @@ const ACCOUNTS: &str = r#"
     name = "Personal"
     provider = "github"
     email = "me@example.com"
-    gitAuth = "https"
     gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
     env = ["GH_TOKEN"]
@@ -21,7 +20,6 @@ const ACCOUNTS: &str = r#"
     name = "Digilope"
     provider = "gitea"
     email = "me@digilope.example"
-    gitAuth = "ssh"
     match = ["app-gitea.digilope.com/**"]
     env = ["GITEA_TOKEN"]
 "#;
@@ -36,6 +34,7 @@ fn stocked_backend() -> EnvBackend {
 fn healthy_wiring() -> GitWiring {
     GitWiring {
         credential_helpers: vec!["gitfriend credential".to_string()],
+        github_helper: Some("gitfriend credential".to_string()),
         use_http_path: Some(true),
     }
 }
@@ -107,6 +106,7 @@ fn github_without_use_http_path_is_a_problem() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let wiring = GitWiring {
         credential_helpers: vec!["gitfriend credential".to_string()],
+        github_helper: Some("gitfriend credential".to_string()),
         use_http_path: Some(false),
     };
 
@@ -124,6 +124,7 @@ fn a_credential_helper_that_is_not_gitfriend_is_a_problem() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let wiring = GitWiring {
         credential_helpers: vec!["manager".to_string()],
+        github_helper: None,
         use_http_path: Some(true),
     };
 
@@ -147,7 +148,6 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
         name = "Personal"
         provider = "github"
         email = "me@example.com"
-        gitAuth = "https"
         match = ["github.com/Personal/**"]
     "#,
     )
@@ -174,14 +174,12 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
         name = "Personal"
         provider = "github"
         email = "me@example.com"
-        gitAuth = "https"
         match = ["github.com/Shared/**"]
 
         [[accounts]]
         name = "Other"
         provider = "github"
         email = "other@example.com"
-        gitAuth = "https"
         match = ["github.com/Shared/**"]
     "#,
     )
@@ -214,7 +212,6 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         name = "Personal"
         provider = "github"
         email = "me@example.com"
-        gitAuth = "https"
         gitCredential = "GH_TOKEN"
         match = ["github.com/Personal/**"]
         env = ["GH_TOKEN"]
@@ -223,7 +220,6 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         name = "Work"
         provider = "github"
         email = "me@work.example"
-        gitAuth = "https"
         gitCredential = "GH_TOKEN"
         match = ["github.com/WorkOrg/**"]
         env = ["GH_TOKEN"]
@@ -239,4 +235,25 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         .filter(|f| f.check == "ambient" && f.message.contains("GH_TOKEN"))
         .count();
     assert_eq!(mentions, 1, "expected one line for GH_TOKEN, got {mentions}");
+}
+
+#[test]
+fn a_url_scoped_helper_bypassing_gitfriend_is_a_problem() {
+    // This machine's actual state: the global helper could be perfect, but
+    // `[credential "https://github.com"]` overrides it outright, so github.com
+    // is served by `gh auth git-credential` instead.
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let wiring = GitWiring {
+        credential_helpers: vec!["gitfriend credential".to_string()],
+        github_helper: Some("!/opt/homebrew/bin/gh auth git-credential".to_string()),
+        use_http_path: Some(true),
+    };
+
+    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+
+    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("github.com is served by")),
+        "a URL-scoped override should be caught even with a correct global helper; got {messages:?}"
+    );
 }
