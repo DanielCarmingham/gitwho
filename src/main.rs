@@ -45,6 +45,9 @@ enum Command {
         command: Vec<String>,
     },
 
+    /// Report whether the wiring is coherent. Read-only; changes nothing.
+    Doctor,
+
     /// Store and inspect token values.
     Secret {
         #[command(subcommand)]
@@ -98,6 +101,13 @@ fn main() -> ExitCode {
 
     match cli.command {
         Command::Credential { operation } => credential(&operation),
+        Command::Doctor => match doctor_report() {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Secret { action } => match secret(action) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -120,6 +130,36 @@ fn main() -> ExitCode {
             }
         },
     }
+}
+
+fn doctor_report() -> Result<ExitCode, String> {
+    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
+    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
+        .map_err(|e| e.to_string())?;
+
+    let ambient: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let wiring = gitfriend::doctor::GitWiring {
+        credential_helpers: gitfriend::git::credential_helpers(),
+        use_http_path: gitfriend::git::use_http_path_for_github(),
+    };
+
+    let findings = gitfriend::doctor::run(&config, &backend, &ambient, &wiring);
+
+    for finding in &findings {
+        let tag = match finding.level {
+            gitfriend::doctor::Level::Ok => "ok  ",
+            gitfriend::doctor::Level::Warn => "warn",
+            gitfriend::doctor::Level::Problem => "FAIL",
+        };
+        println!("{tag} [{}] {}", finding.check, finding.message);
+    }
+
+    if gitfriend::doctor::has_problems(&findings) {
+        println!();
+        println!("doctor found problems; nothing was changed");
+        return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn secret(action: SecretAction) -> Result<(), String> {

@@ -26,3 +26,38 @@ pub fn origin_url(dir: &Path) -> Option<String> {
     let url = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (!url.is_empty()).then_some(url)
 }
+
+/// Every configured `credential.helper`, in the order git would consult them.
+pub fn credential_helpers() -> Vec<String> {
+    config_values(&["config", "--get-all", "credential.helper"])
+}
+
+/// `credential.useHttpPath` for github.com. `None` when unset.
+///
+/// Asked as the URL-scoped question git itself would ask, so a
+/// `[credential "https://github.com"]` section is honoured rather than only
+/// the global default.
+pub fn use_http_path_for_github() -> Option<bool> {
+    let values = config_values(&[
+        "config",
+        "--get-urlmatch",
+        "credential.useHttpPath",
+        "https://github.com",
+    ]);
+    values.first().map(|v| v == "true")
+}
+
+fn config_values(args: &[&str]) -> Vec<String> {
+    let Ok(output) = Command::new("git").args(args).output() else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
