@@ -7,3 +7,4 @@ pub mod mcp;
 pub mod resolve;
 pub mod secrets;
 pub mod shim;
+pub mod sync;

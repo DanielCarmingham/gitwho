@@ -109,6 +109,26 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
         }
     }
 
+    // An identity with no author name generates `name = `, which makes every
+    // commit in that repo fail. Cheap to check, confusing to diagnose later.
+    for account in &config.accounts {
+        let has_name = account
+            .git_name
+            .as_deref()
+            .or(config.defaults.git_name.as_deref())
+            .is_some_and(|n| !n.trim().is_empty());
+        if !has_name {
+            findings.push(Finding::new(
+                Level::Problem,
+                "config",
+                format!(
+                    "account {} has no author name; set defaults.gitName or the account's gitName",
+                    account.name
+                ),
+            ));
+        }
+    }
+
     for account in &config.accounts {
         for pattern in &account.match_patterns {
             if let Err(e) = globset::Glob::new(pattern) {

@@ -7,6 +7,7 @@ use gitfriend::secrets::EnvBackend;
 const ACCOUNTS: &str = r#"
     [defaults]
     account = "Personal"
+    gitName = "Test Person"
 
     [[accounts]]
     name = "Personal"
@@ -143,6 +144,7 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
         r#"
         [defaults]
         account = "Ghost"
+        gitName = "Test Person"
 
         [[accounts]]
         name = "Personal"
@@ -169,6 +171,7 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
         r#"
         [defaults]
         account = "Personal"
+        gitName = "Test Person"
 
         [[accounts]]
         name = "Personal"
@@ -207,6 +210,7 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         r#"
         [defaults]
         account = "Personal"
+        gitName = "Test Person"
 
         [[accounts]]
         name = "Personal"
@@ -255,5 +259,33 @@ fn a_url_scoped_helper_bypassing_gitfriend_is_a_problem() {
     assert!(
         messages.iter().any(|m| m.contains("github.com is served by")),
         "a URL-scoped override should be caught even with a correct global helper; got {messages:?}"
+    );
+}
+
+#[test]
+fn an_account_with_no_author_name_anywhere_is_a_problem() {
+    // Generating `name = ` produces a gitconfig that makes commits fail. Seen
+    // for real: the draft config declared no gitName, and sync emitted an
+    // empty one without complaint.
+    let config = Config::parse(
+        r#"
+        [defaults]
+        account = "Personal"
+
+        [[accounts]]
+        name = "Personal"
+        provider = "github"
+        email = "me@example.com"
+        match = ["github.com/Personal/**"]
+    "#,
+    )
+    .unwrap();
+
+    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+
+    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("author name")),
+        "a missing author name should be a problem; got {messages:?}"
     );
 }

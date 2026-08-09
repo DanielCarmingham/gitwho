@@ -31,6 +31,10 @@ pub struct Defaults {
     /// The account used when nothing else matches. Declared explicitly so the
     /// fallback is stated rather than emergent (R4).
     pub account: String,
+    /// The author name for every account that does not override it. Kept here
+    /// because it is the same person throughout; only the address differs.
+    #[serde(rename = "gitName", default)]
+    pub git_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +63,9 @@ pub struct Account {
     /// neither.
     #[serde(rename = "sshKey", default)]
     pub ssh_key: Option<String>,
+    /// Author name, when this account differs from `defaults.gitName`.
+    #[serde(rename = "gitName", default)]
+    pub git_name: Option<String>,
     /// Glob patterns matched against `host/path` of a remote URL.
     #[serde(rename = "match", default)]
     pub match_patterns: Vec<String>,

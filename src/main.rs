@@ -48,6 +48,19 @@ enum Command {
     /// Report whether the wiring is coherent. Read-only; changes nothing.
     Doctor,
 
+    /// Generate the git config that selects an identity per repository.
+    ///
+    /// Writes only into gitfriend's own directory. Include it once from your
+    /// main gitconfig; nothing hand-written is ever rewritten.
+    Sync {
+        /// Directory to generate into.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Apply the changes instead of only reporting them.
+        #[arg(long)]
+        write: bool,
+    },
+
     /// Route provider MCP servers through `exec`.
     Mcp {
         #[command(subcommand)]
@@ -131,6 +144,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Sync { dir, write } => match sync_config(dir, write) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitfriend: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Mcp { action } => match mcp(action) {
             Ok(code) => code,
             Err(message) => {
@@ -189,6 +209,41 @@ fn doctor_report() -> Result<ExitCode, String> {
         println!();
         println!("doctor found problems; nothing was changed");
         return Ok(ExitCode::FAILURE);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
+    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
+    let dir = dir.unwrap_or_else(|| path_from_env("GITFRIEND_GIT_DIR", "git"));
+
+    let plan = gitfriend::sync::plan(&config, &dir);
+
+    if !write {
+        for file in &plan.files {
+            let current = std::fs::read_to_string(&file.path).ok();
+            let state = match current.as_deref() {
+                Some(existing) if existing == file.contents => "unchanged",
+                Some(_) => "would update",
+                None => "would create",
+            };
+            println!("{state:<13} {}", file.path.display());
+        }
+        println!();
+        println!("nothing was written; re-run with --write to apply");
+        println!("then add this to your gitconfig, once:");
+        println!("    [include]");
+        println!("        path = {}", dir.join("includes.gitconfig").display());
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let changed = gitfriend::sync::apply(&plan).map_err(|e| e.to_string())?;
+    if changed.is_empty() {
+        println!("already up to date");
+    } else {
+        for path in &changed {
+            println!("wrote {}", path.display());
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
