@@ -285,15 +285,22 @@ only needed if you re-run `secret import --from-env`. Keeping them is a second
 copy of every token in plaintext; deleting them makes the secrets file the only
 copy. Take a backup of the file somewhere off-repo before deleting.
 
-**`GITHUB_PAT` and `GITHUB_PAT_PROFOUND`.** **Not dead** — checked 2026-08-10.
-Both are fine-grained PATs (`github_pat_`), both authenticate successfully, as
-`DanielCarmingham` and `DanielAtProfound` respectively, and both expire
-**2026-12-16**. What *consumes* them is still unknown — nothing in the
-dotfiles, `~/.local/bin`, direnv config, or MCP config references them. So they
-are working credentials with no identified reader: either something outside
-those places uses them, or they were issued and forgotten. Decide whether to
-fold them into gitfriend as the GitHub credentials (they are a better fit than
-the `gho_` tokens, since they carry an expiry) or revoke them.
+**`GITHUB_PAT` and `GITHUB_PAT_PROFOUND`.** Checked 2026-08-10: both are
+fine-grained PATs, both authenticate (as `DanielCarmingham` and
+`DanielAtProfound`), both expire **2026-12-16** — **and both can see none of
+the work orgs.** `GITHUB_PAT_PROFOUND` lists 0 repos in `EJ-Rice` and 0 in
+`profoundcollective`, where that account's `gho_` token sees 3 and 8. Not a
+403; an empty list.
+
+Fine-grained PATs need the resource owner set to the org *and* org approval;
+without it they cover the personal account only. So these are valid but nearly
+useless, which reads like an abandoned earlier attempt at this same problem.
+Likely safe to revoke — but confirm nothing consumes them first, since that is
+still unknown.
+
+**Do not switch to fine-grained PATs as part of the cutover.** They would fail
+in a way that looks like gitfriend being broken. Getting there means an org
+settings change first, which may not be yours to make.
 
 **Keychain.** Blocked on whether signing the installed binary with a stable
 identity stops the per-rebuild prompt. `examples/keychain_probe.rs` answers it.
@@ -302,17 +309,16 @@ does not depend on a key file sitting next to the data.
 
 ---
 
-## Before step 1: the personal token is currently dead
+## Before step 1: check every token is alive
 
-Checked 2026-08-10. `GH_TOKEN_DanielCarmingham` (a `gho_` OAuth token from
-`gh auth login`) returns **401 Bad credentials**. `GH_TOKEN_DanielAtProfound`
-and `GH_TOKEN_DanielAtKitchenCloud` were not both checked, but Profound's
-works.
+`GH_TOKEN_DanielCarmingham` was found dead (401) on 2026-08-10 and has since
+been rotated; the replacement works. `GH_TOKEN_DanielAtProfound` works.
+`GH_TOKEN_DanielAtKitchenCloud` has **not** been checked.
 
-So **do not `secret import --from-env` and assume the result is usable** — you
+**Do not `secret import --from-env` and assume the result is usable** — you
 would import a dead credential and then spend the cutover debugging gitfriend
-for it. Either re-issue it (`gh auth login` as DanielCarmingham) before step 1,
-or use `GITHUB_PAT`, which is valid and carries an expiry.
+for it. Note also that `~/.zshrc.local` holds a *copy*: rotating via
+`gh auth login` updates gh's own store, not that file, so the two drift.
 
 Check any token in one request, without printing it:
 
