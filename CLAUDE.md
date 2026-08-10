@@ -10,9 +10,26 @@ questions. [README.md](README.md) is the short version.
 
 ## Status
 
-Requirements + evidence only. **Nothing is implemented in this repo yet.** The
-current working implementation is path-based and lives in the user's dotfiles
-(`cfg` repo) — see "Prior art on this machine" below.
+**Built and tested; not adopted.** All seven build phases are done — resolver,
+credential helper, secret storage, `exec` + shims, `doctor`, `sync`, MCP
+wrapping. Nothing in `$HOME` has been changed; the machine still runs the old
+path-based dotfiles setup described under "Prior art" below.
+
+The remaining work is the cutover: **[docs/CUTOVER.md](docs/CUTOVER.md)**, with
+a starting config in [docs/accounts.toml.example](docs/accounts.toml.example).
+Read both before touching anything in `$HOME`.
+
+Corrections to `REQUIREMENTS.md` found by measuring the real machine:
+
+- **Digilope is not ssh-only.** It uses `app-gitea.digilope.com` over ssh *and*
+  `gitea.digilope.com` over https, so it does need a token in the transport
+  path. Transport is a property of a remote, not an account — which is why
+  there is no `gitAuth` field.
+- **github.com is served by `gh auth git-credential`**, set url-scoped in
+  `~/.gitconfig-darwin`, not by the credential manager in `.gitconfig-common`.
+  A url-scoped section overrides the general list outright.
+- **supacode uses worktrees, not clones**, so today's path rules survive by
+  luck rather than by design.
 
 ## Ground rules
 

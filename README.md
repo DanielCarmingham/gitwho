@@ -33,5 +33,24 @@ behind them (all measured, not assumed), and the open questions.
 
 ## Status
 
-Requirements and evidence gathered. Nothing built here yet — the current
-working implementation still lives in dotfiles and is path-based.
+**Built and tested; not yet adopted.** The machine still runs the old
+path-based dotfiles setup — nothing in `$HOME` has been changed.
+
+```
+gitfriend doctor        report whether the wiring is coherent (read-only)
+gitfriend sync          generate the identity rules
+gitfriend credential    git credential helper
+gitfriend exec -- cmd   run a command with exactly one account's credentials
+gitfriend shim install  wrapper scripts for gh / tea
+gitfriend secret …      store tokens; only fingerprints are ever printed
+gitfriend mcp sync      route provider MCP servers through exec
+```
+
+**Picking this up?** Read [docs/CUTOVER.md](docs/CUTOVER.md) — the remaining
+work is switching this machine over, step by step, with a check and an undo
+for each.
+
+Design and the measurements behind it:
+[docs/superpowers/specs/2026-08-09-gitfriend-design.md](docs/superpowers/specs/2026-08-09-gitfriend-design.md).
+Requirements: [REQUIREMENTS.md](REQUIREMENTS.md) — note its claim that Digilope
+needs no token in the push/pull path is wrong; that host serves https too.

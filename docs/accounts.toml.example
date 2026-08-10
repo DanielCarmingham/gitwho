@@ -1,0 +1,74 @@
+# Starting point for ~/.config/gitfriend/accounts.toml.
+#
+# Not a hypothetical example: the match patterns were derived on 2026-08-09 by
+# reading the origin remote of every repository under ~/Developer, so they
+# cover the orgs actually in use. Re-check them if that has changed --
+# docs/CUTOVER.md step 1.
+#
+# Contains no secrets. `env` and `gitCredential` name variables; the values
+# live in the age-encrypted store (R10).
+#
+# Known gap: ~12 clones of other people's repositories under
+# ~/Developer/DanielCarmingham (microsoft, dotnet, charmbracelet, ghostty-org)
+# match nothing here on purpose. They resolve to the default account tagged
+# Unmatched -- `gh` works, the credential helper still refuses.
+
+[defaults]
+account = "DanielCarmingham"
+gitName = "Daniel Carmingham"
+
+[[accounts]]
+name = "DanielCarmingham"
+provider = "github"
+email = "15822947+DanielCarmingham@users.noreply.github.com"
+gitCredential = "GH_TOKEN"
+sshKey = "~/.ssh/id_ed25519_github_DanielCarmingham"
+match = ["github.com/DanielCarmingham/**"]
+paths = ["/Users/daniel/Developer/DanielCarmingham/"]
+env = ["GH_TOKEN"]
+
+[[accounts]]
+name = "DanielAtProfound"
+provider = "github"
+email = "daniel@profoundcollective.com"
+gitCredential = "GH_TOKEN"
+# Seven distinct orgs live under ~/Developer/Profound today.
+match = [
+    "github.com/DanielAtProfound/**",
+    "github.com/profoundcollective/**",
+    "github.com/profound-rj/**",
+    "github.com/EJ-Rice/**",
+    "github.com/AquaTraction/**",
+    "github.com/Composite-Labs/**",
+]
+paths = ["/Users/daniel/Developer/Profound/"]
+env = ["GH_TOKEN"]
+
+[[accounts]]
+name = "DanielAtKitchenCloud"
+provider = "github"
+email = "daniel@kitchencloud.ai"
+gitCredential = "GH_TOKEN"
+# All five KitchenCloud repos are github.com/KitchenCloudDev/*, so the
+# nesting hazard disappears: the org distinguishes them, not the path.
+match = ["github.com/KitchenCloudDev/**"]
+# Still needed: two repos here have no remote at all.
+paths = ["/Users/daniel/Developer/Profound/KitchenCloud/"]
+env = ["GH_TOKEN"]
+
+[[accounts]]
+name = "Digilope"
+provider = "gitea"
+email = "dacarming@gmail.com"
+# Both transports at once, which is why neither is declared as "the" one:
+# app-gitea.digilope.com over ssh, gitea.digilope.com over https. The token
+# serves the https remotes and `tea`; the key serves the ssh remotes.
+gitCredential = "GITEA_TOKEN"
+sshKey = "~/.ssh/id_ed25519_Digilope_Gitea_Daniel"
+match = [
+    "app-gitea.digilope.com/**",
+    "gitea.digilope.com/**",
+    "forgejo.digilope.com/**",
+]
+paths = ["/Users/daniel/Developer/Digilope/"]
+env = ["GITEA_TOKEN", "GITEA_HOST=https://app-gitea.digilope.com"]
