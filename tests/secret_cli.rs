@@ -186,3 +186,47 @@ fn import_from_the_environment_preserves_the_value() {
         "the imported Gitea token's fingerprint is missing; got:\n{stdout}"
     );
 }
+
+#[test]
+fn setting_a_secret_for_an_unknown_account_is_refused() {
+    // A typo would otherwise store a secret nothing ever reads, and the
+    // symptom appears later as a missing credential somewhere else entirely.
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+
+    let out = run_with_stdin(
+        dir.path(),
+        &["secret", "set", "Personel", "GH_TOKEN"],
+        "tok\n",
+    );
+
+    assert!(!out.status.success(), "an unknown account should be refused");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("Personel") && err.contains("Personal"),
+        "the error should name the typo and suggest the real accounts; got: {err}"
+    );
+}
+
+#[test]
+fn setting_an_undeclared_variable_warns_but_still_stores() {
+    // Not an error: you may be adding the variable to accounts.toml next. But
+    // silence would let a secret sit unread forever.
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+
+    let out = run_with_stdin(
+        dir.path(),
+        &["secret", "set", "Personal", "NPM_TOKEN"],
+        "tok\n",
+    );
+
+    assert!(out.status.success(), "it should still store");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.to_lowercase().contains("not declared") || err.to_lowercase().contains("does not declare"),
+        "expected a warning about the undeclared variable; got: {err}"
+    );
+}

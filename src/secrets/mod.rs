@@ -14,6 +14,10 @@ pub use keychain::KeychainBackend;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
+    #[error("the value was empty; nothing stored")]
+    Empty,
+    #[error("cannot read the value: {0}")]
+    Read(#[from] std::io::Error),
     #[error("secret store failed for {account}/{var}: {message}")]
     Backend {
         account: String,
@@ -53,4 +57,26 @@ pub fn fingerprint(value: &str) -> String {
     // 12 hex characters -- enough to distinguish a handful of tokens by eye,
     // far too little to attack the preimage.
     digest[..6].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Read a secret value from non-interactive input.
+///
+/// Surrounding whitespace is stripped, because every ordinary way of supplying
+/// a value adds some: `echo` appends a newline, a heredoc appends a newline, a
+/// paste ends with Enter. Sent as part of the token that whitespace is
+/// rejected by the server with an error that mentions nothing about
+/// whitespace, which is a genuinely hard afternoon.
+///
+/// An empty result is an error rather than an empty secret: a stored empty
+/// string would satisfy every "is it present?" check while authenticating as
+/// nobody.
+pub fn read_value_from(reader: &mut impl std::io::Read) -> Result<String, SecretError> {
+    let mut raw = String::new();
+    reader.read_to_string(&mut raw)?;
+
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(SecretError::Empty);
+    }
+    Ok(value.to_string())
 }

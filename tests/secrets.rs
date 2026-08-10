@@ -144,3 +144,32 @@ fn reading_a_secret_is_cheap_enough_for_the_git_hot_path() {
         "a secret read took {elapsed:?}, too slow for the git hot path"
     );
 }
+
+// --- reading a value from non-interactive input -----------------------------
+
+#[test]
+fn a_pasted_value_loses_its_trailing_newline() {
+    // Piping through `echo`, a heredoc, or a paste that ends in Enter all add
+    // one. Sent as part of the token it is rejected by the server, with an
+    // error that says nothing about whitespace.
+    let value = gitfriend::secrets::read_value_from(&mut "tok-value\n".as_bytes()).unwrap();
+
+    assert_eq!(value, "tok-value");
+}
+
+#[test]
+fn surrounding_whitespace_from_a_paste_is_removed() {
+    let value = gitfriend::secrets::read_value_from(&mut "  tok-value \r\n".as_bytes()).unwrap();
+
+    assert_eq!(value, "tok-value");
+}
+
+#[test]
+fn an_empty_value_is_refused_rather_than_stored() {
+    // Storing an empty string would satisfy every "is it present?" check while
+    // authenticating as nobody.
+    let error = gitfriend::secrets::read_value_from(&mut "   \n".as_bytes())
+        .expect_err("an empty value must be refused");
+
+    assert!(error.to_string().contains("empty"), "got: {error}");
+}

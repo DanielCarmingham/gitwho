@@ -302,23 +302,32 @@ fn secret(action: SecretAction) -> Result<(), String> {
         SecretAction::Init => unreachable!("handled above"),
 
         SecretAction::Set { account, var } => {
-            let mut value = String::new();
-            std::io::stdin()
-                .read_to_string(&mut value)
-                .map_err(|e| format!("cannot read the value from stdin: {e}"))?;
+            // Catch a typo before it becomes a secret nothing ever reads --
+            // the symptom would otherwise surface later as a missing
+            // credential somewhere else entirely.
+            let declared = config.account(&account).ok_or_else(|| {
+                let known: Vec<&str> = config.accounts.iter().map(|a| a.name.as_str()).collect();
+                format!(
+                    "no account named {account:?}; accounts.toml declares: {}",
+                    known.join(", ")
+                )
+            })?;
 
-            // A trailing newline from `echo` or a heredoc would be sent as
-            // part of the token and rejected by the server, with an error that
-            // says nothing about whitespace.
-            let value = value.trim_end_matches(['\n', '\r']);
-            if value.is_empty() {
-                return Err("no value on stdin".to_string());
+            if !declared.secret_vars().contains(&var.as_str()) {
+                // A warning, not an error: the variable may be about to be
+                // added to accounts.toml. Silence would let it sit unread.
+                eprintln!(
+                    "gitfriend: warning: account {account} does not declare {var}; \
+                     nothing will read it until accounts.toml lists it"
+                );
             }
 
+            let value = read_value(&account, &var)?;
+
             backend
-                .set(&account, &var, value)
+                .set(&account, &var, &value)
                 .map_err(|e| e.to_string())?;
-            println!("stored {account}/{var} ({})", fingerprint(value));
+            println!("stored {account}/{var} ({})", fingerprint(&value));
             Ok(())
         }
 
@@ -377,6 +386,31 @@ fn secret(action: SecretAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Read the value, prompting only when someone is actually there to read the
+/// prompt.
+///
+/// On a terminal: a prompt naming what is being set, and hidden input that
+/// ends at Enter -- no invisible wait for a Ctrl-D nobody was told about. When
+/// piped, behaviour is unchanged, so scripts and the test suite are unaffected.
+fn read_value(account: &str, var: &str) -> Result<String, String> {
+    use std::io::IsTerminal;
+
+    if std::io::stdin().is_terminal() {
+        let value = rpassword::prompt_password(format!(
+            "Value for {account}/{var} (input hidden, Enter when done): "
+        ))
+        .map_err(|e| format!("cannot read the value: {e}"))?;
+
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            return Err("the value was empty; nothing stored".to_string());
+        }
+        return Ok(value);
+    }
+
+    gitfriend::secrets::read_value_from(&mut std::io::stdin()).map_err(|e| e.to_string())
 }
 
 fn shim(action: ShimAction) -> Result<(), String> {
