@@ -58,17 +58,31 @@ env = ["GH_TOKEN"]
 
 [[accounts]]
 name = "Digilope"
-provider = "gitea"
+provider = "gitea"          # Forgejo is a Gitea fork; `tea` speaks to it
 email = "dacarming@gmail.com"
-# Both transports at once, which is why neither is declared as "the" one:
-# app-gitea.digilope.com over ssh, gitea.digilope.com over https. The token
-# serves the https remotes and `tea`; the key serves the ssh remotes.
+# Forgejo, since the Gitea migration. Same naming convention as before:
+# forgejo.digilope.com is the TLS-terminated HTTPS server (and the API),
+# app-forgejo.digilope.com is the raw machine port, which is what ssh needs.
+# The `app-` PREFIX marks the raw host, exactly as app-gitea did.
+#
+# Two hostnames, one account: git picks the transport per remote and the
+# credential helper is only ever consulted for https, so the token below
+# serves forgejo.digilope.com and the key serves app-forgejo. No per-service
+# config is needed -- that is why there is no gitAuth field.
+#
+# NOTE: *.digilope.com has WILDCARD DNS, so any name resolves and something
+# answers. A hostname appearing to work proves nothing; check the clone URL
+# Forgejo itself displays.
 gitCredential = "GITEA_TOKEN"
 sshKey = "~/.ssh/id_ed25519_Digilope_Gitea_Daniel"
 match = [
+    "forgejo.digilope.com/**",
+    "app-forgejo.digilope.com/**",
+    # Legacy Gitea names. The servers were renamed, not replaced, and local
+    # clones still carry these remotes -- keeping them means those repos still
+    # resolve to the right identity. Remove once the remotes are updated.
     "app-gitea.digilope.com/**",
     "gitea.digilope.com/**",
-    "forgejo.digilope.com/**",
 ]
 paths = ["/Users/daniel/Developer/Digilope/"]
-env = ["GITEA_TOKEN", "GITEA_HOST=https://app-gitea.digilope.com"]
+env = ["GITEA_TOKEN", "GITEA_HOST=https://forgejo.digilope.com"]

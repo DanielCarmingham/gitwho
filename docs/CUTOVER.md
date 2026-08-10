@@ -309,6 +309,39 @@ does not depend on a key file sitting next to the data.
 
 ---
 
+## Digilope is broken independently of gitfriend
+
+Found 2026-08-10 while running the cutover. Gitea was migrated to Forgejo and
+**nothing on this machine followed**. None of this is caused by gitfriend, and
+none of it is fixed by it — but it will look like gitfriend's fault if you meet
+it mid-cutover.
+
+Naming follows the same convention as Gitea did: `forgejo.digilope.com` is the
+TLS-terminated HTTPS server and the API; `app-forgejo.digilope.com` — `app-` as
+a **prefix** — is the raw machine port, which is what ssh needs.
+
+**`*.digilope.com` has wildcard DNS.** Every name resolves, to
+`129.212.178.201`, and something there answers ssh. This is a trap: a
+mistyped hostname looks alive and even produces a plausible
+`Permission denied (publickey)`. Verify a hostname against the clone URL
+Forgejo itself shows, never against "it resolved" or "ssh answered".
+
+What is actually established:
+
+1. **The token is dead.** `GITEA_TOKEN` gets a 401 from
+   `forgejo.digilope.com`, which is a real host with a real certificate. Issue
+   a new token in Forgejo, then `gitfriend secret set Digilope GITEA_TOKEN`.
+   The dead value is currently stored, so `doctor` reports it present — it
+   cannot yet tell dead from live (the `--check-remote` stretch task).
+2. **The ssh path is unresolved.** `id_ed25519_Digilope_Gitea_Daniel` is
+   refused by `app-forgejo.digilope.com` for both `gitea@` and `git@`, but that
+   host offers password auth, which suggests a general-purpose sshd rather than
+   Forgejo's git-only one — so the port or user may simply differ. Get the real
+   remote URL from Forgejo before concluding the key needs re-adding.
+3. **Local remotes still point at `app-gitea.digilope.com`** and cannot fetch.
+   `accounts.toml` keeps the legacy patterns so those repos still resolve to
+   the right *identity*; repoint the remotes when the ssh path is known.
+
 ## Before step 1: check every token is alive
 
 `GH_TOKEN_DanielCarmingham` was found dead (401) on 2026-08-10 and has since
