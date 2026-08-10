@@ -285,9 +285,15 @@ only needed if you re-run `secret import --from-env`. Keeping them is a second
 copy of every token in plaintext; deleting them makes the secrets file the only
 copy. Take a backup of the file somewhere off-repo before deleting.
 
-**`GITHUB_PAT` and `GITHUB_PAT_PROFOUND`.** Still no known consumer — not in
-the dotfiles, `~/.local/bin`, direnv config, or MCP config, and `tea` has never
-been logged in. Confirm before removing; treat as unknown, not dead.
+**`GITHUB_PAT` and `GITHUB_PAT_PROFOUND`.** **Not dead** — checked 2026-08-10.
+Both are fine-grained PATs (`github_pat_`), both authenticate successfully, as
+`DanielCarmingham` and `DanielAtProfound` respectively, and both expire
+**2026-12-16**. What *consumes* them is still unknown — nothing in the
+dotfiles, `~/.local/bin`, direnv config, or MCP config references them. So they
+are working credentials with no identified reader: either something outside
+those places uses them, or they were issued and forgotten. Decide whether to
+fold them into gitfriend as the GitHub credentials (they are a better fit than
+the `gho_` tokens, since they carry an expiry) or revoke them.
 
 **Keychain.** Blocked on whether signing the installed binary with a stable
 identity stops the per-rebuild prompt. `examples/keychain_probe.rs` answers it.
@@ -295,6 +301,29 @@ Not required — the age file works — but it would add encryption at rest that
 does not depend on a key file sitting next to the data.
 
 ---
+
+## Before step 1: the personal token is currently dead
+
+Checked 2026-08-10. `GH_TOKEN_DanielCarmingham` (a `gho_` OAuth token from
+`gh auth login`) returns **401 Bad credentials**. `GH_TOKEN_DanielAtProfound`
+and `GH_TOKEN_DanielAtKitchenCloud` were not both checked, but Profound's
+works.
+
+So **do not `secret import --from-env` and assume the result is usable** — you
+would import a dead credential and then spend the cutover debugging gitfriend
+for it. Either re-issue it (`gh auth login` as DanielCarmingham) before step 1,
+or use `GITHUB_PAT`, which is valid and carries an expiry.
+
+Check any token in one request, without printing it:
+
+```sh
+curl -sI -H "Authorization: Bearer $TOKEN" https://api.github.com/user \
+  | grep -iE 'HTTP/|github-authentication-token-expiration|x-oauth-scopes'
+```
+
+`200` plus an expiry means a PAT with a known lifetime. `200` plus
+`x-oauth-scopes` and no expiry means an OAuth token, which does not expire.
+`401` means dead.
 
 ## Things that will bite you
 
