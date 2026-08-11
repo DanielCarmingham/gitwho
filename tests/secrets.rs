@@ -125,6 +125,48 @@ fn the_age_backend_never_writes_plaintext_to_disk() {
     );
 }
 
+/// The claim the backend makes about permissions has to be checkable, because
+/// on a platform where it cannot be kept the silence is indistinguishable from
+/// success. Here the claim is tied to the mode actually on disk; where it
+/// cannot be made, `doctor` says so instead.
+#[test]
+fn the_backend_states_what_protection_it_could_actually_apply() {
+    use gitfriend::secrets::Protection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let backend = test_backend(&dir);
+    backend.set("Work", "GH_TOKEN", "token-value").unwrap();
+
+    let owner_only = gitfriend::secrets::AgeFileBackend::protection() == Protection::OwnerOnly;
+
+    // The claim must track the platform. Flipping the cfg behind
+    // `Protection::HOST` without meaning to would silently turn the check below
+    // off; this is what stops that.
+    assert_eq!(
+        owner_only,
+        cfg!(unix),
+        "unix can apply owner-only permissions and nothing else here can"
+    );
+
+    if owner_only {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for name in ["identity.key", "secrets.age"] {
+                let mode = std::fs::metadata(dir.path().join(name))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                assert_eq!(mode, 0o600, "{name} claims owner-only but is {mode:o}");
+            }
+        }
+    }
+    // Where it cannot be claimed there is nothing on disk to check; the promise
+    // on that platform is that `doctor` reports the gap, which tests/doctor.rs
+    // covers. Unverified: there is no Windows machine here.
+}
+
 #[test]
 fn reading_a_secret_is_cheap_enough_for_the_git_hot_path() {
     // R15: resolution runs on every git transport operation, so a read must

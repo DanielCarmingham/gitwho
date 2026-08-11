@@ -33,6 +33,28 @@ backend is implemented but unusable: macOS keys its ACL to the calling binary,
 so every rebuild blocks on a GUI prompt. See `src/secrets/keychain.rs` and
 `examples/keychain_probe.rs` if you want to revisit that.
 
+### Choosing the store
+
+The age file is the default on every platform. Nothing selects the Keychain on
+its own — that stays true until the probe says a signed binary survives a
+rebuild.
+
+| Where | How | Scope |
+|---|---|---|
+| `GITFRIEND_SECRET_BACKEND=age\|keychain` | environment | one invocation; beats the config |
+| `[defaults] secretBackend = "age"` in `accounts.toml` | config | this machine |
+| nothing | — | `age` |
+
+There is no flag: git launches the credential helper itself, so a flag would
+never reach the path that matters. A name that is not `age` or `keychain` is
+refused rather than resolved to the default, and asking for `keychain` where
+there is no store at all — a Linux box with no D-Bus session bus — is refused
+too, naming what is missing. What is *not* checked is whether the store will
+prompt: answering that means opening it, and opening it is the bug.
+
+`gitfriend doctor` prints which store is in effect and what chose it, under
+`[backend]`.
+
 ---
 
 ## Before you start
@@ -80,11 +102,25 @@ cp ~/.gitconfig-darwin ~/.gitconfig-darwin.pre-gitfriend
 ## Step 1 — Install the config and the secrets
 
 ```sh
-mkdir -p ~/.config/gitfriend
+gitfriend secret init                           # creates ~/.config/gitfriend (0700) + identity.key
 cp docs/accounts.toml.example ~/.config/gitfriend/accounts.toml
+chmod 600 ~/.config/gitfriend/accounts.toml     # a redirect vector; doctor fails if it is looser
 $EDITOR ~/.config/gitfriend/accounts.toml      # see "Decisions still open" below
-gitfriend secret init                           # writes ~/.config/gitfriend/identity.key
 ```
+
+`secret init` first, and not a `mkdir -p`, because it creates the directory
+owner-only: `mkdir` applies the umask, and the usual `022` leaves it `0755` —
+group- and world-traversable, which is the only thing keeping the identity key
+and every stored token out of another local account's reach. `doctor` calls
+anything but `0700` a problem, so a hand-made directory fails the check on the
+first run.
+
+`secret init` reads `accounts.toml` when there is one, so a machine that sets
+`secretBackend` is honoured — with the Keychain in effect it prints that no
+identity file is needed rather than writing a key that decrypts nothing. Run in
+the order above and it has no config to read yet, which is not an error (a
+malformed one is). Run it after the `cp` and it still works; you then have to
+`chmod 700 ~/.config/gitfriend` yourself.
 
 Then import the existing tokens. **This must run in an interactive shell**:
 `~/.zshrc.local` is only sourced for those, and `import` reads the environment
@@ -396,18 +432,35 @@ blocker was that an ad-hoc signature changes on every rebuild, which is what
 made macOS prompt. `examples/keychain_probe.rs` settles whether signing fixes
 it. See the dex task.
 
+Switching once the probe passes is now `GITFRIEND_SECRET_BACKEND=keychain` for
+one command, or `secretBackend = "keychain"` under `[defaults]` for the machine
+— not an edit to `main.rs` and a rebuild. What the probe unblocks is therefore
+the decision, not the plumbing. Nothing chooses the Keychain automatically even
+after that: the default is still the age file until someone changes it
+deliberately.
+
 **Where it is stronger than GCM.** No ambient tokens, and child processes are
 actively scrubbed. It refuses on an unclaimed host or a low-confidence
 resolution, where GCM serves whatever it holds for that host. And per-org
 selection across three GitHub accounts is the thing GCM cannot do at all —
 which is why this machine used `gh auth git-credential` before.
 
-**Hardening applied by hand.** The config directory was `0755` and
-`accounts.toml` was `0644`; both are now owner-only. `accounts.toml` matters
-because it is a redirect vector — whoever can write it can add a `match`
-pattern for their own host and be handed a token. Nothing yet stops a later
-`umask`, editor, or backup restore from loosening them silently; a `doctor`
-check is logged.
+**Hardening, and where it comes from now.** On this machine the config
+directory was `0755` and `accounts.toml` was `0644`, both fixed by hand.
+Writing the check first and the writer second was the wrong order: `doctor`
+demanded `0700` while `secret init` created the directory with `create_dir_all`,
+which applies the umask — so every fresh install failed a check on permissions
+gitfriend itself had set. `secret init` now creates the directory owner-only, and
+the identity key and `secrets.age` are opened `0600` rather than written and
+then chmodded, which left them complete on disk at `0644` for the width of the
+chmod. `accounts.toml` is still copied by hand and still matters most — it is a
+redirect vector, since whoever can write it can add a `match` pattern for their
+own host and be handed a token — so Step 1 chmods it.
+
+Nothing stops a later `umask`, editor, or backup restore from loosening any of
+them, but it is no longer silent: `doctor` checks the mode and owner of the
+directory and of all three files, and fails naming the one that drifted *and*
+the `chmod` that puts it back.
 
 **Not addressed.** Decrypted tokens are not zeroized in memory. Stored tokens
 are long-lived `gho_` OAuth tokens that never expire, so a stolen one is

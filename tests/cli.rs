@@ -66,6 +66,7 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Ou
         .env("GITFRIEND_CONFIG", dir.join("accounts.toml"))
         .env("GITFRIEND_SECRETS", dir.join("secrets.age"))
         .env("GITFRIEND_IDENTITY", dir.join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -174,6 +175,68 @@ fn an_unclaimed_host_gets_no_credential_from_the_real_binary() {
     assert!(!output.status.success(), "git should not have succeeded");
 }
 
+/// The credential helper is run *by git*, inside whatever environment the
+/// surrounding shell had. Building a map of all of it to find `HOME` decoded
+/// every other variable too, and `std::env::vars` panics on one that is not
+/// Unicode -- a legacy locale, a path off a non-UTF-8 filesystem, anything a
+/// tool exported. git reads a failed helper as "no credential" and falls
+/// through to a prompt, so the whole design would be defeated by a variable
+/// gitfriend has no interest in.
+#[cfg(unix)]
+#[test]
+fn a_non_unicode_variable_elsewhere_in_the_environment_is_ignored() {
+    use std::io::Write;
+    use std::os::unix::ffi::OsStringExt;
+
+    // A real HOME rather than the GITFRIEND_* overrides the other tests use:
+    // those short-circuit before the environment is ever consulted, which is
+    // exactly why this went unnoticed.
+    let home = tempfile::tempdir().unwrap();
+    let store = home.path().join(".config").join("gitfriend");
+    std::fs::create_dir_all(&store).unwrap();
+    fixture(&store);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitfriend"));
+    command
+        .args(["credential", "get"])
+        .env("HOME", home.path())
+        // Not valid UTF-8, and nothing to do with gitfriend.
+        .env(
+            "GITFRIEND_TEST_BYSTANDER",
+            std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for var in [
+        "GITFRIEND_CONFIG",
+        "GITFRIEND_SECRETS",
+        "GITFRIEND_IDENTITY",
+        "GITFRIEND_SECRET_BACKEND",
+    ] {
+        command.env_remove(var);
+    }
+    let mut child = command.spawn().expect("gitfriend should run");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"protocol=https\nhost=github.com\npath=Personal/thing.git\n\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "the helper failed on a variable it never reads; stderr={stderr}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("username="),
+        "no credential came back; stderr={stderr}"
+    );
+}
+
 // --- exec -------------------------------------------------------------------
 
 const EXEC_ACCOUNTS: &str = r#"
@@ -241,6 +304,7 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
         .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
         .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
         .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .output()
         .unwrap();
@@ -276,6 +340,7 @@ fn a_generated_shim_routes_a_cli_through_exec() {
         .arg(&shim_dir)
         .arg("env")
         .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
         .output()
         .unwrap();
     assert!(
@@ -289,6 +354,7 @@ fn a_generated_shim_routes_a_cli_through_exec() {
         .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
         .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
         .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .env(
             "PATH",
@@ -333,6 +399,7 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
         .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
         .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
         .output()
         .unwrap();
 
@@ -346,4 +413,120 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         "the fallback should be stated, not silent; stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// With no home directory to resolve against, gitfriend used to fall back to a
+/// *relative* path and read `.config/gitfriend/accounts.toml` from wherever it
+/// was standing. A config planted in a working tree decides which host is
+/// handed which token, so it must refuse rather than obey (R8).
+#[test]
+fn a_missing_home_does_not_read_config_from_the_working_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let ambush = dir.path().join(".config").join("gitfriend");
+    std::fs::create_dir_all(&ambush).unwrap();
+    std::fs::write(
+        ambush.join("accounts.toml"),
+        r#"
+        [defaults]
+        account = "Ambush"
+        gitName = "Someone Else"
+
+        [[accounts]]
+        name = "Ambush"
+        provider = "github"
+        email = "someone@else.example"
+        match = ["github.com/**"]
+    "#,
+    )
+    .unwrap();
+
+    // `sync --dir` is the cheapest subcommand that reads accounts.toml and
+    // nothing else, so a config that was read is visible in the output as a
+    // generated `<Account>.gitconfig`.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitfriend"));
+    command
+        .args(["sync", "--dir"])
+        .arg(dir.path().join("out"))
+        .current_dir(dir.path());
+    for var in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "GITFRIEND_CONFIG",
+        "GITFRIEND_SECRETS",
+        "GITFRIEND_IDENTITY",
+        "GITFRIEND_GIT_DIR",
+        "GITFRIEND_SECRET_BACKEND",
+    ] {
+        command.env_remove(var);
+    }
+    let output = command.output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "it should refuse rather than resolve a home directory it does not have; stdout=\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Ambush") && !stderr.contains("Ambush"),
+        "the planted config in the working directory was read; stdout=\n{stdout}\nstderr={stderr}"
+    );
+    assert!(
+        stderr.contains("HOME"),
+        "the error should name the variable that is missing; stderr={stderr}"
+    );
+}
+
+// Modes only exist where `doctor::check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn doctor_reports_a_world_readable_config_file() {
+    // The only cover for the Store wiring in main.rs: that doctor stats the
+    // files the rest of the binary actually reads.
+    //
+    // `fixture` writes accounts.toml with plain `fs::write`, so the local
+    // umask decides its mode -- 0644 here. That is the loosened state under
+    // test; any future CLI test that runs doctor will see the same finding.
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::set_permissions(
+        dir.path().join("accounts.toml"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+        .arg("doctor")
+        // Without an emptied git config the assertion would depend on the
+        // developer's own machine. Doctor then FAILs for unrelated and correct
+        // reasons, so this asserts on the line rather than the exit code.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
+        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.contains("[permissions]") && l.contains("accounts.toml")),
+        "doctor should name the loosened config file; stdout=\n{stdout}\nstderr={stderr}"
+    );
+
+    // R10: the new output path must not have become a way to print a value.
+    for value in ["personal-token", "work-token"] {
+        assert!(
+            !stdout.contains(value) && !stderr.contains(value),
+            "doctor printed a stored value"
+        );
+    }
 }

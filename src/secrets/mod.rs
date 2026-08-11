@@ -7,10 +7,12 @@
 mod age_file;
 mod env;
 mod keychain;
+pub mod select;
 
-pub use age_file::AgeFileBackend;
+pub use age_file::{AgeFileBackend, Protection};
 pub use env::EnvBackend;
 pub use keychain::KeychainBackend;
+pub use select::{choose, BackendKind, Choice, Platform, SelectError, Source};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {

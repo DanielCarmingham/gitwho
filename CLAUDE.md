@@ -19,6 +19,21 @@ The remaining work is the cutover: **[docs/CUTOVER.md](docs/CUTOVER.md)**, with
 a starting config in [docs/accounts.toml.example](docs/accounts.toml.example).
 Read both before touching anything in `$HOME`.
 
+**Generated but unverified: the Windows paths.** `%APPDATA%\gitfriend` in
+`src/paths.rs`, the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs`, and the
+fact that gitfriend applies no ACLs there (`Protection::DirectoryInherited`, so
+`doctor` warns rather than the file being closed down). All are unit-tested as
+pure functions from macOS; none has ever run on Windows. Do not describe them as
+working.
+
+The mechanism that makes that testable is a **parameter, never a `cfg!`**:
+`paths::Layout` and `shim::ShimTarget` are arguments, with `HOST` used only by
+`main`. A `cfg!(windows)` branch is unreachable from a test run here, so it can
+be documented as covered while nothing can reach it — which is exactly what
+happened to the `APPDATA` branch. The test binaries are `#[cfg(unix)]`-gated
+around anything touching `std::os::unix`, so `cargo test` still *builds*
+elsewhere.
+
 Corrections to `REQUIREMENTS.md` found by measuring the real machine:
 
 - **Digilope is not ssh-only.** It uses `app-gitea.digilope.com` over ssh *and*

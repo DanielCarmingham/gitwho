@@ -33,7 +33,11 @@ fn gitfriend(dir: &Path, args: &[&str]) -> Command {
     cmd.args(args)
         .env("GITFRIEND_CONFIG", dir.join("accounts.toml"))
         .env("GITFRIEND_SECRETS", dir.join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.join("identity.key"));
+        .env("GITFRIEND_IDENTITY", dir.join("identity.key"))
+        // Cleared, not merely unset here: it is the highest-precedence backend
+        // selector, so a developer who exported it -- as CUTOVER.md tells them
+        // to -- would otherwise point this suite at their real login keychain.
+        .env_remove("GITFRIEND_SECRET_BACKEND");
     cmd
 }
 
@@ -130,8 +134,14 @@ fn secret_list_reports_declared_variables_with_no_stored_value() {
     );
 }
 
+/// Whichever platform this runs on, something must be asserted. The `cfg(unix)`
+/// block used to be the whole body, so on Windows -- the one platform where
+/// gitfriend cannot apply the mode -- the test passed while checking nothing.
+/// Where the promise cannot be kept, the promise is that `doctor` says so.
 #[test]
 fn the_identity_and_secrets_files_are_owner_only() {
+    use gitfriend::secrets::{AgeFileBackend, Protection};
+
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
     run(dir.path(), &["secret", "init"]);
@@ -141,18 +151,113 @@ fn the_identity_and_secrets_files_are_owner_only() {
         "tok\n",
     );
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        for name in ["identity.key", "secrets.age"] {
-            let mode = std::fs::metadata(dir.path().join(name))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(mode, 0o600, "{name} should be 0600, was {mode:o}");
+    if AgeFileBackend::protection() == Protection::OwnerOnly {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for name in ["identity.key", "secrets.age"] {
+                let mode = std::fs::metadata(dir.path().join(name))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                assert_eq!(mode, 0o600, "{name} should be 0600, was {mode:o}");
+            }
         }
+    } else {
+        // Unverified: this arm has never run, because there is no Windows
+        // machine here. It is written so the gap is loud there rather than
+        // silent.
+        let doctor = run(dir.path(), &["doctor"]);
+        let stdout = String::from_utf8_lossy(&doctor.stdout);
+        assert!(
+            stdout
+                .lines()
+                .any(|l| l.starts_with("warn") && l.contains("secrets.age")),
+            "where owner-only cannot be applied, doctor must warn; got:\n{stdout}"
+        );
     }
+}
+
+/// A machine records its store in `accounts.toml`; a single command overrides
+/// it from the environment. Asserted through the age file, so no test in this
+/// suite ever reaches the real login keychain.
+#[test]
+fn the_environment_overrides_the_configured_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("accounts.toml"),
+        ACCOUNTS.replace(
+            "[defaults]\n    account = \"Personal\"",
+            "[defaults]\n    account = \"Personal\"\n    secretBackend = \"keychain\"",
+        ),
+    )
+    .unwrap();
+
+    let with_override = |args: &[&str]| {
+        let mut cmd = gitfriend(dir.path(), args);
+        cmd.env("GITFRIEND_SECRET_BACKEND", "age");
+        cmd
+    };
+
+    assert!(with_override(&["secret", "init"]).output().unwrap().status.success());
+
+    let mut child = with_override(&["secret", "set", "Personal", "GH_TOKEN"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"tok-overridden\n")
+        .unwrap();
+    let set = child.wait_with_output().unwrap();
+    assert!(
+        set.status.success(),
+        "set failed: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    assert!(
+        dir.path().join("secrets.age").exists(),
+        "the override was ignored; nothing was written to the age file"
+    );
+
+    let list = with_override(&["secret", "list"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains(&fingerprint("tok-overridden")),
+        "the value did not come back from the age file; got:\n{stdout}"
+    );
+}
+
+/// A typo in the configured backend must not resolve to the default: a working
+/// store that is not the one asked for is exactly the quiet wrongness R8 rules
+/// out.
+#[test]
+fn an_unknown_configured_backend_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("accounts.toml"),
+        ACCOUNTS.replace(
+            "[defaults]\n    account = \"Personal\"",
+            "[defaults]\n    account = \"Personal\"\n    secretBackend = \"kechain\"",
+        ),
+    )
+    .unwrap();
+    run(dir.path(), &["secret", "init"]);
+
+    let list = run(dir.path(), &["secret", "list"]);
+
+    assert!(!list.status.success(), "an unknown backend should be refused");
+    let err = String::from_utf8_lossy(&list.stderr);
+    assert!(
+        err.contains("kechain") && err.contains("age"),
+        "the error should quote the typo and name the real backends; got: {err}"
+    );
 }
 
 /// The existing machine keeps tokens as `GH_TOKEN_<Account>` exports in
@@ -206,6 +311,67 @@ fn setting_a_secret_for_an_unknown_account_is_refused() {
     assert!(
         err.contains("Personel") && err.contains("Personal"),
         "the error should name the typo and suggest the real accounts; got: {err}"
+    );
+}
+
+/// A fresh install has to pass gitfriend's own `doctor`, and `doctor` requires
+/// the store directory to be `0700` -- it is the only thing keeping the
+/// identity key and every stored token out of another local account's reach.
+/// `create_dir_all` applies the umask, so the ubiquitous `022` left it `0755`
+/// and a correct install failed the check it ships with.
+///
+/// Run through a shell with a stated umask, because the developer's own would
+/// otherwise decide whether this test can fail at all.
+#[cfg(unix)]
+#[test]
+fn secret_init_creates_the_store_directory_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let store = home.path().join(".config").join("gitfriend");
+
+    let out = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "umask 022; exec \"$0\" secret init",
+            env!("CARGO_BIN_EXE_gitfriend"),
+        ])
+        .env("GITFRIEND_CONFIG", store.join("accounts.toml"))
+        .env("GITFRIEND_SECRETS", store.join("secrets.age"))
+        .env("GITFRIEND_IDENTITY", store.join("identity.key"))
+        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "secret init failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "a fresh install left the store directory {mode:04o}, which doctor calls a problem"
+    );
+}
+
+/// The harness itself, not the binary. `GITFRIEND_SECRET_BACKEND` is the
+/// highest-precedence backend selector and `docs/CUTOVER.md` tells the operator
+/// to export it -- so a developer following the docs would turn this suite into
+/// one that writes test values into the real login keychain and blocks on the
+/// GUI prompt the age file exists to avoid.
+#[test]
+fn the_harness_clears_the_backend_override_so_no_test_can_reach_a_real_keychain() {
+    let dir = tempfile::tempdir().unwrap();
+    let cmd = gitfriend(dir.path(), &["secret", "list"]);
+
+    let cleared = cmd.get_envs().any(|(var, value)| {
+        var == std::ffi::OsStr::new("GITFRIEND_SECRET_BACKEND") && value.is_none()
+    });
+
+    assert!(
+        cleared,
+        "the helper lets the developer's shell choose this suite's secret store"
     );
 }
 

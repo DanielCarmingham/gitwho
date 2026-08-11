@@ -991,6 +991,7 @@ dependencies = [
  "clap",
  "globset",
  "keyring",
+ "libc",
  "rpassword",
  "serde",
  "serde_json",

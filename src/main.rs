@@ -3,6 +3,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{self, ExitCode};
+use std::sync::OnceLock;
 
 use clap::{Parser, Subcommand};
 
@@ -10,7 +11,8 @@ use gitfriend::config::Config;
 use gitfriend::credential::{respond, Request};
 use gitfriend::exec::plan_env;
 use gitfriend::resolve::{resolve_repo, Reason};
-use gitfriend::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend};
+use gitfriend::secrets::select::{self, BackendKind, Choice, Platform};
+use gitfriend::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
 
 #[derive(Parser)]
 #[command(name = "gitfriend", version, about = "Per-repository git identity and credentials")]
@@ -183,18 +185,36 @@ fn main() -> ExitCode {
 }
 
 fn doctor_report() -> Result<ExitCode, String> {
-    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
-    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
-        .map_err(|e| e.to_string())?;
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let (backend, choice) = open_backend(config.defaults.secret_backend.as_deref())?;
+    let backend = backend.as_ref();
 
-    let ambient: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    let ambient: std::collections::BTreeMap<String, String> = unicode_env().collect();
     let wiring = gitfriend::doctor::GitWiring {
         credential_helpers: gitfriend::git::credential_helpers(),
         github_helper: gitfriend::git::credential_helper_for("https://github.com"),
         use_http_path: gitfriend::git::use_http_path_for_github(),
     };
 
-    let findings = gitfriend::doctor::run(&config, &backend, &ambient, &wiring);
+    // The directory is taken from the config's own parent rather than assumed
+    // to be `~/.config/gitfriend`, so the environment overrides below keep
+    // pointing everything at one place.
+    let config_file = config_path()?;
+    let store = gitfriend::doctor::Store {
+        dir: config_file
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".")),
+        config: config_file,
+        identity: identity_path()?,
+        secrets: secrets_path()?,
+        owner: gitfriend::doctor::current_uid(),
+        backend: choice,
+        owner_only_enforced: AgeFileBackend::protection()
+            == gitfriend::secrets::Protection::OwnerOnly,
+    };
+
+    let findings = gitfriend::doctor::run(&config, backend, &ambient, &wiring, &store);
 
     for finding in &findings {
         let tag = match finding.level {
@@ -214,8 +234,11 @@ fn doctor_report() -> Result<ExitCode, String> {
 }
 
 fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
-    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
-    let dir = dir.unwrap_or_else(|| path_from_env("GITFRIEND_GIT_DIR", "git"));
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let dir = match dir {
+        Some(dir) => dir,
+        None => path_from_env("GITFRIEND_GIT_DIR", "git")?,
+    };
 
     let plan = gitfriend::sync::plan(&config, &dir);
 
@@ -289,14 +312,12 @@ fn mcp(action: McpAction) -> Result<ExitCode, String> {
 
 fn secret(action: SecretAction) -> Result<(), String> {
     if matches!(action, SecretAction::Init) {
-        AgeFileBackend::generate_identity_file(&identity_path()).map_err(|e| e.to_string())?;
-        println!("created {}", identity_path().display());
-        return Ok(());
+        return secret_init();
     }
 
-    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
-    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
-        .map_err(|e| e.to_string())?;
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let (backend, _) = open_backend(config.defaults.secret_backend.as_deref())?;
+    let backend = backend.as_ref();
 
     match action {
         SecretAction::Init => unreachable!("handled above"),
@@ -359,8 +380,7 @@ fn secret(action: SecretAction) -> Result<(), String> {
                 return Err("specify a source, e.g. --from-env".to_string());
             }
 
-            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-            let source = EnvBackend::from_map(env);
+            let source = EnvBackend::from_map(unicode_env().collect());
             let mut imported = 0;
 
             for account in &config.accounts {
@@ -386,6 +406,43 @@ fn secret(action: SecretAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Create the identity key that unlocks the age file -- unless the store in
+/// effect has no such thing.
+///
+/// `accounts.toml` is read so `secretBackend` is honoured, but a *missing* one
+/// is not an error: `init` is the first command anyone runs, and with no config
+/// there is no configured backend to ignore. A config that exists and is broken
+/// still fails, loudly.
+fn secret_init() -> Result<(), String> {
+    let configured = match Config::load(&config_path()?) {
+        Ok(config) => config.defaults.secret_backend,
+        Err(gitfriend::config::ConfigError::Read { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            None
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+
+    let choice = choose_backend(configured.as_deref())?;
+    if choice.kind != BackendKind::AgeFile {
+        // Said, not done. A stray identity key would sit there decrypting
+        // nothing, and asking the store itself is precisely what the selection
+        // code exists to avoid.
+        println!(
+            "the {} store needs no identity file (chosen {})",
+            choice.kind.name(),
+            choice.source.describe()
+        );
+        return Ok(());
+    }
+
+    let path = identity_path()?;
+    AgeFileBackend::generate_identity_file(&path).map_err(|e| e.to_string())?;
+    println!("created {}", path.display());
+    Ok(())
 }
 
 /// Read the value, prompting only when someone is actually there to read the
@@ -428,9 +485,9 @@ fn shim(action: ShimAction) -> Result<(), String> {
 }
 
 fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, String> {
-    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
-    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
-        .map_err(|e| e.to_string())?;
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let (backend, _) = open_backend(config.defaults.secret_backend.as_deref())?;
+    let backend = backend.as_ref();
 
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
 
@@ -455,7 +512,7 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
         }
     };
 
-    let plan = plan_env(&config, &backend, account).map_err(|e| e.to_string())?;
+    let plan = plan_env(&config, backend, account).map_err(|e| e.to_string())?;
 
     let (program, args) = command.split_first().expect("clap requires a command");
     let mut child = process::Command::new(program);
@@ -512,15 +569,15 @@ fn credential_get() -> Result<String, String> {
         .read_to_string(&mut input)
         .map_err(|e| format!("cannot read the request from git: {e}"))?;
 
-    let config = Config::load(&config_path()).map_err(|e| e.to_string())?;
-    let backend = AgeFileBackend::with_identity_file(secrets_path(), &identity_path())
-        .map_err(|e| e.to_string())?;
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let (backend, _) = open_backend(config.defaults.secret_backend.as_deref())?;
+    let backend = backend.as_ref();
 
     let request = Request::parse(&input);
     let cwd = std::env::current_dir().ok();
 
     let credential =
-        respond(&config, &backend, &request, cwd.as_deref()).map_err(|e| e.to_string())?;
+        respond(&config, backend, &request, cwd.as_deref()).map_err(|e| e.to_string())?;
 
     Ok(format!(
         "username={}\npassword={}\n",
@@ -530,22 +587,82 @@ fn credential_get() -> Result<String, String> {
 
 /// Locations are overridable by environment variable so the test suite can run
 /// against a fixture without touching the real machine.
-fn path_from_env(var: &str, default_file: &str) -> PathBuf {
+///
+/// Fallible, because the alternative is a *relative* path: without a home
+/// directory there is no defensible answer, and answering anyway means reading
+/// config out of the current working directory.
+fn path_from_env(var: &str, default_file: &str) -> Result<PathBuf, String> {
     if let Some(value) = std::env::var_os(var) {
-        return PathBuf::from(value);
+        return Ok(PathBuf::from(value));
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join(".config").join("gitfriend").join(default_file)
+    Ok(store_dir()?.join(default_file))
 }
 
-fn config_path() -> PathBuf {
+/// gitfriend's own directory, resolved once per process.
+///
+/// Once, because three files are asked for on every invocation and the answer
+/// cannot change inside one -- and because this sits on the credential hot path
+/// (R15). The failure is cached too, so it reads the same wherever it surfaces.
+fn store_dir() -> Result<&'static PathBuf, String> {
+    static DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+
+    DIR.get_or_init(|| {
+        gitfriend::paths::config_dir(
+            &gitfriend::paths::from_process,
+            gitfriend::paths::Layout::HOST,
+        )
+        .map_err(|e| e.to_string())
+    })
+    .as_ref()
+    .map_err(String::clone)
+}
+
+/// The environment as UTF-8 pairs, skipping anything that is not.
+///
+/// `std::env::vars` panics on a single non-Unicode entry *anywhere* in the
+/// environment, and gitfriend inherits whatever git or a shell happened to have
+/// -- so one stray variable would take out the credential helper before it read
+/// a byte of the request. Nothing gitfriend looks for here, a managed variable
+/// name or a token value, can be non-Unicode and still be usable, so skipping
+/// loses nothing that was ever going to be found.
+fn unicode_env() -> impl Iterator<Item = (String, String)> {
+    std::env::vars_os()
+        .filter_map(|(var, value)| Some((var.into_string().ok()?, value.into_string().ok()?)))
+}
+
+/// Resolve which store is in effect, and open it.
+///
+/// One place, so every subcommand answers the question identically -- and so
+/// the answer is a value the caller can report rather than a fact buried in a
+/// constructor.
+fn open_backend(configured: Option<&str>) -> Result<(Box<dyn Backend>, Choice), String> {
+    let choice = choose_backend(configured)?;
+
+    let backend: Box<dyn Backend> = match choice.kind {
+        BackendKind::AgeFile => Box::new(
+            AgeFileBackend::with_identity_file(secrets_path()?, &identity_path()?)
+                .map_err(|e| e.to_string())?,
+        ),
+        BackendKind::Keychain => Box::new(KeychainBackend::new()),
+    };
+
+    Ok((backend, choice))
+}
+
+fn choose_backend(configured: Option<&str>) -> Result<Choice, String> {
+    let from_env = std::env::var(select::ENV_VAR).ok();
+    select::choose(from_env.as_deref(), configured, &Platform::detect())
+        .map_err(|e| e.to_string())
+}
+
+fn config_path() -> Result<PathBuf, String> {
     path_from_env("GITFRIEND_CONFIG", "accounts.toml")
 }
 
-fn secrets_path() -> PathBuf {
+fn secrets_path() -> Result<PathBuf, String> {
     path_from_env("GITFRIEND_SECRETS", "secrets.age")
 }
 
-fn identity_path() -> PathBuf {
+fn identity_path() -> Result<PathBuf, String> {
     path_from_env("GITFRIEND_IDENTITY", "identity.key")
 }

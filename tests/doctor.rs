@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 use gitfriend::config::Config;
-use gitfriend::doctor::{self, GitWiring, Level};
-use gitfriend::secrets::EnvBackend;
+use gitfriend::doctor::{self, GitWiring, Level, Store};
+use gitfriend::secrets::{BackendKind, Choice, Source};
+use gitfriend::secrets::{Backend, EnvBackend};
+use tempfile::TempDir;
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -47,11 +50,86 @@ fn problems(findings: &[doctor::Finding]) -> Vec<&doctor::Finding> {
         .collect()
 }
 
+/// A mode, where the platform has such a thing. `std::os::unix` does not exist
+/// on Windows, and `check_permissions` is itself a no-op there -- gating here
+/// rather than at every call site keeps the rest of this file buildable, the
+/// way `tests/secrets.rs` already does.
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) {}
+
+/// A store laid out the way the cutover left the real machine: the directory
+/// owner-only, the three files owner-read-write.
+///
+/// The contents are inert placeholders -- this fixture is about modes, and
+/// nothing here should ever be mistaken for, or shaped like, a token.
+fn hardened_store() -> TempDir {
+    let dir = tempfile::tempdir().expect("a temp dir");
+
+    // mkdtemp already gives 0700, but say it rather than rely on it.
+    set_mode(dir.path(), 0o700);
+
+    for name in ["accounts.toml", "identity.key", "secrets.age"] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, b"# placeholder\n").unwrap();
+        // The developer's umask decides what `write` produces (0644 here), so
+        // the mode has to be set explicitly for the fixture to mean anything.
+        set_mode(&path, 0o600);
+    }
+
+    dir
+}
+
+fn store_at(dir: &Path) -> Store {
+    Store {
+        dir: dir.to_path_buf(),
+        config: dir.join("accounts.toml"),
+        identity: dir.join("identity.key"),
+        secrets: dir.join("secrets.age"),
+        owner: doctor::current_uid(),
+        backend: Choice {
+            kind: BackendKind::AgeFile,
+            source: Source::Default,
+        },
+        // No `Default` for `Store`: a default claiming owner-only permissions
+        // would be a lie on the one platform this field exists to catch.
+        owner_only_enforced: true,
+    }
+}
+
+fn permission_problems(findings: &[doctor::Finding]) -> Vec<&doctor::Finding> {
+    problems(findings)
+        .into_iter()
+        .filter(|f| f.check == "permissions")
+        .collect()
+}
+
+/// Run against a store whose permissions are already correct, so a test about
+/// some other check is not quietly answering a permissions question it did not
+/// ask.
+fn run_with(
+    config: &Config,
+    backend: &dyn Backend,
+    ambient: &BTreeMap<String, String>,
+    wiring: &GitWiring,
+) -> Vec<doctor::Finding> {
+    // Bound with a `let`: as a temporary it would drop before `run` stats
+    // anything, and every path would silently read as nonexistent.
+    let dir = hardened_store();
+    doctor::run(config, backend, ambient, wiring, &store_at(dir.path()))
+}
+
 #[test]
 fn a_healthy_setup_reports_no_problems() {
     let config = Config::parse(ACCOUNTS).unwrap();
 
-    let findings = doctor::run(
+    let findings = run_with(
         &config,
         &stocked_backend(),
         &BTreeMap::new(),
@@ -73,7 +151,7 @@ fn a_declared_secret_with_no_stored_value_is_a_problem() {
         "personal-token".to_string(),
     )]));
 
-    let findings = doctor::run(&config, &half_stocked, &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(&config, &half_stocked, &BTreeMap::new(), &healthy_wiring());
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -89,7 +167,7 @@ fn a_managed_variable_present_in_the_environment_is_reported() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "leaked-token".to_string())]);
 
-    let findings = doctor::run(&config, &stocked_backend(), &ambient, &healthy_wiring());
+    let findings = run_with(&config, &stocked_backend(), &ambient, &healthy_wiring());
 
     let reported = findings.iter().find(|f| f.message.contains("GH_TOKEN"));
     let reported = reported.expect("an ambient managed variable should be reported");
@@ -111,7 +189,7 @@ fn github_without_use_http_path_is_a_problem() {
         use_http_path: Some(false),
     };
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -129,7 +207,7 @@ fn a_credential_helper_that_is_not_gitfriend_is_a_problem() {
         use_http_path: Some(true),
     };
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -155,7 +233,7 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
     )
     .unwrap();
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -188,7 +266,7 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
     )
     .unwrap();
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -232,7 +310,7 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
     .unwrap();
     let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "leaked".to_string())]);
 
-    let findings = doctor::run(&config, &stocked_backend(), &ambient, &healthy_wiring());
+    let findings = run_with(&config, &stocked_backend(), &ambient, &healthy_wiring());
 
     let mentions = findings
         .iter()
@@ -253,7 +331,7 @@ fn a_url_scoped_helper_bypassing_gitfriend_is_a_problem() {
         use_http_path: Some(true),
     };
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
@@ -281,11 +359,338 @@ fn an_account_with_no_author_name_anywhere_is_a_problem() {
     )
     .unwrap();
 
-    let findings = doctor::run(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
         messages.iter().any(|m| m.contains("author name")),
         "a missing author name should be a problem; got {messages:?}"
+    );
+}
+
+/// The hardening applied by hand during the cutover, now guarded. Nothing
+/// stops a later umask, editor, or backup restore from loosening these, and
+/// the loss would otherwise be silent.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_hardened_store_reports_no_permission_problems() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    assert!(
+        permission_problems(&findings).is_empty(),
+        "correct modes should raise nothing; got {:?}",
+        permission_problems(&findings)
+    );
+}
+
+/// The one that matters most: everything under the directory is only out of
+/// reach because the directory itself is. `sync`'s generated `git/` subtree is
+/// 0755, and this is what keeps it unreachable.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_config_directory_that_is_not_owner_only_is_a_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    set_mode(dir.path(), 0o755);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    let named = dir.path().display().to_string();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(&named) && m.contains("0755") && m.contains("0700")),
+        "the loosened directory, its mode and the expected one should all be named; got {messages:?}"
+    );
+}
+
+/// accounts.toml is a redirect vector: whoever can write it can add a `match`
+/// pattern for their own host and be handed a token.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_group_or_world_readable_accounts_toml_is_a_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    set_mode(&dir.path().join("accounts.toml"), 0o644);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("accounts.toml") && m.contains("0644") && m.contains("0600")),
+        "the loosened config file and its mode should be named; got {messages:?}"
+    );
+}
+
+/// `doctor` reports and `sync` fixes -- but nothing in gitfriend fixes a mode,
+/// and `accounts.toml` arrives by hand from the example. A finding that names
+/// the stake without the remedy is one the operator learns to read past, which
+/// is how the redirect vector this check exists for would later go unnoticed.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_permission_finding_says_what_to_run_to_fix_it() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    set_mode(&dir.path().join("accounts.toml"), 0o644);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("accounts.toml") && m.contains("chmod 600")),
+        "the finding should carry the command that fixes it; got {messages:?}"
+    );
+}
+
+/// Anything able to read the identity key can decrypt secrets.age -- the
+/// encryption protects the file at rest, not against a local reader.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_readable_identity_key_is_a_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    set_mode(&dir.path().join("identity.key"), 0o640);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("identity.key") && m.contains("0640")),
+        "the loosened identity key should be named; got {messages:?}"
+    );
+}
+
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_readable_secrets_file_is_a_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    set_mode(&dir.path().join("secrets.age"), 0o644);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("secrets.age") && m.contains("0644")),
+        "the loosened secrets file should be named; got {messages:?}"
+    );
+}
+
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_store_owned_by_someone_else_is_a_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+
+    // Chowning to another user needs root, so the expectation is what varies.
+    // wrapping_add rather than 0, which would pass by accident under root.
+    let mut store = store_at(dir.path());
+    store.owner = doctor::current_uid().wrapping_add(1);
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store,
+    );
+
+    let messages: Vec<_> = permission_problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
+    for name in ["accounts.toml", "identity.key", "secrets.age"] {
+        assert!(
+            messages.iter().any(|m| m.contains(name) && m.contains("owned by")),
+            "{name} should be reported as foreign-owned; got {messages:?}"
+        );
+    }
+    let named = dir.path().display().to_string();
+    assert!(
+        messages.iter().any(|m| m.contains(&named) && m.contains("owned by")),
+        "the directory should be reported as foreign-owned; got {messages:?}"
+    );
+}
+
+/// A fresh install has no secrets.age until the first `secret set`. Absence is
+/// check_secrets' business; reporting it here too would make a clean install
+/// look broken.
+// Modes only exist where `check_permissions` does.
+#[cfg(unix)]
+#[test]
+fn a_store_with_no_secrets_file_yet_is_not_a_permission_problem() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    std::fs::remove_file(dir.path().join("secrets.age")).unwrap();
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    assert!(
+        permission_problems(&findings).is_empty(),
+        "a not-yet-created file is not a permissions failure; got {:?}",
+        permission_problems(&findings)
+    );
+}
+
+/// "Which store am I using" is only half the question; the other half is what
+/// decided. A machine whose `accounts.toml` says one thing and whose shell says
+/// another is exactly when someone runs `doctor`.
+#[test]
+fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    let mut store = store_at(dir.path());
+    store.backend = Choice {
+        kind: BackendKind::Keychain,
+        source: Source::Environment,
+    };
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store,
+    );
+
+    let reported = findings
+        .iter()
+        .find(|f| f.check == "backend")
+        .expect("doctor should say which store is in effect");
+    assert!(
+        reported.message.contains("keychain")
+            && reported.message.contains("GITFRIEND_SECRET_BACKEND"),
+        "the store and what chose it should both be named; got: {}",
+        reported.message
+    );
+}
+
+/// Where owner-only permissions cannot be applied -- Windows, where gitfriend
+/// writes no ACLs -- the no-op has to be visible. Reporting the gap is the
+/// honest alternative to shipping ACL code nobody here can run.
+#[test]
+fn doctor_warns_when_owner_only_permissions_cannot_be_enforced() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    let mut store = store_at(dir.path());
+    store.owner_only_enforced = false;
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store,
+    );
+
+    let warned = findings
+        .iter()
+        .find(|f| f.level == Level::Warn && f.message.contains("secrets.age"))
+        .expect("the unenforceable permission should be warned about by name");
+    assert_eq!(warned.check, "backend");
+}
+
+/// The keychain keeps nothing on disk, so a permissions warning about a file
+/// that does not exist would be noise pointing at the wrong thing.
+#[test]
+fn a_keychain_store_is_not_warned_about_file_permissions() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let dir = hardened_store();
+    let mut store = store_at(dir.path());
+    store.backend = Choice {
+        kind: BackendKind::Keychain,
+        source: Source::Config,
+    };
+    store.owner_only_enforced = false;
+
+    let findings = doctor::run(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store,
+    );
+
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.level == Level::Warn && f.message.contains("secrets.age")),
+        "a store with no file should raise no file-permission warning; got {findings:?}"
     );
 }

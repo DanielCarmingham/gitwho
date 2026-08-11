@@ -1,17 +1,30 @@
 use super::{Backend, SecretError};
 
-/// The default macOS Keychain service name. One service, many entries -- the
-/// entry's "account" field carries `<Account>/<VAR>`.
+/// The service name every entry is filed under. One service, many entries --
+/// the entry's "account" field carries `<Account>/<VAR>`.
 const DEFAULT_SERVICE: &str = "gitfriend";
 
-/// Stores values in the platform credential store: macOS Keychain here,
-/// Credential Manager on Windows, Secret Service on Linux.
+/// Stores values in whatever credential store the platform provides.
 ///
 /// Unlike an environment variable, a value here is fetched on demand by the
 /// one process that needs it, so it is never visible to unrelated tooling
 /// launched from the same shell (R11).
 ///
-/// **Not usable for development, measured 2026-08-09.** macOS keys a Keychain
+/// **This type is portable; the property worth having is not.** `keyring`
+/// 4.1.6's default features cover all three stores, so the code below compiles
+/// and runs everywhere -- but they do not draw the same boundary:
+///
+/// | Store | Keeps a secret from |
+/// |---|---|
+/// | macOS Keychain | *other applications*, via a per-application ACL |
+/// | Windows Credential Manager (DPAPI) | other users |
+/// | Linux Secret Service | other users |
+///
+/// Only the first is stronger than an age file that is already `0600` and owned
+/// by you, which is why nothing here is chosen automatically on any platform.
+/// See `secrets::select`.
+///
+/// **And on macOS it is not usable yet, measured 2026-08-09.** macOS keys that
 /// ACL to the calling binary's designated requirement. For an unsigned binary
 /// that is its code hash, so *every rebuild* presents as a new application and
 /// the read blocks on a GUI prompt -- verified by writing an entry with one
@@ -21,7 +34,9 @@ const DEFAULT_SERVICE: &str = "gitfriend";
 ///
 /// Making this viable needs the installed binary signed with a stable identity
 /// so its designated requirement survives rebuilds. Until that is set up and
-/// re-verified, use [`AgeFileBackend`](super::AgeFileBackend).
+/// re-verified with `examples/keychain_probe.rs`, use
+/// [`AgeFileBackend`](super::AgeFileBackend) -- which is what `select::choose`
+/// hands back unless someone asks for this one by name.
 pub struct KeychainBackend {
     service: String,
 }

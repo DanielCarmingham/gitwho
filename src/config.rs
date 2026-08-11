@@ -35,6 +35,15 @@ pub struct Defaults {
     /// because it is the same person throughout; only the address differs.
     #[serde(rename = "gitName", default)]
     pub git_name: Option<String>,
+    /// Which secret store holds the values on this machine: `age` or
+    /// `keychain`. Unset means the built-in default.
+    ///
+    /// Kept as a plain string. Which names are legal is
+    /// `secrets::select`'s business -- a parser that knew them would reject a
+    /// typo with a message about TOML rather than about backends, and would
+    /// have to be edited to add one.
+    #[serde(rename = "secretBackend", default)]
+    pub secret_backend: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

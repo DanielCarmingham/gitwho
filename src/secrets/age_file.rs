@@ -33,7 +33,37 @@ pub struct AgeFileBackend {
 /// The decrypted contents: `Account/VAR` to value.
 type Entries = BTreeMap<String, String>;
 
+/// How far this platform lets gitfriend close the file down.
+///
+/// Named rather than left implicit because the weaker answer must be *reported*
+/// (`doctor`), not silently accepted: a no-op that looks like success is how a
+/// file ends up readable by everyone who can reach the directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protection {
+    /// `0600`, applied by gitfriend.
+    OwnerOnly,
+    /// Whatever the containing directory grants. On a default Windows profile
+    /// that is owner plus SYSTEM plus Administrators -- weaker than `0600`, not
+    /// world-readable. Unverified: there is no Windows machine here.
+    DirectoryInherited,
+}
+
+impl Protection {
+    /// What [`restrict_permissions`] can achieve on the platform this was built
+    /// for. Stated once, so the two `cfg` arms below cannot drift from it.
+    pub const HOST: Protection = if cfg!(unix) {
+        Protection::OwnerOnly
+    } else {
+        Protection::DirectoryInherited
+    };
+}
+
 impl AgeFileBackend {
+    /// What the files this backend writes are actually protected by.
+    pub fn protection() -> Protection {
+        Protection::HOST
+    }
+
     pub fn new(path: impl Into<PathBuf>, identity: x25519::Identity) -> Self {
         Self {
             path: path.into(),
@@ -64,18 +94,12 @@ impl AgeFileBackend {
     /// Create a new identity and write it with owner-only permissions.
     ///
     /// Refuses to overwrite: replacing the key would strand every secret
-    /// already encrypted to the old one.
+    /// already encrypted to the old one. The refusal is the `open` itself
+    /// rather than a preceding `exists`, so two `secret init`s racing cannot
+    /// both decide the file was absent.
     pub fn generate_identity_file(key_path: &Path) -> Result<(), SecretError> {
-        if key_path.exists() {
-            return Err(at(
-                key_path,
-                "identity already exists; refusing to overwrite and strand existing secrets"
-                    .to_string(),
-            ));
-        }
-
         if let Some(parent) = key_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| at(key_path, e.to_string()))?;
+            create_store_dir(parent).map_err(|e| at(key_path, e.to_string()))?;
         }
 
         let identity = x25519::Identity::generate();
@@ -85,8 +109,18 @@ impl AgeFileBackend {
              {}\n",
             identity.to_string().expose_secret()
         );
-        std::fs::write(key_path, contents).map_err(|e| at(key_path, e.to_string()))?;
-        restrict_permissions(key_path)
+
+        create_owner_only(key_path, contents.as_bytes()).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                at(
+                    key_path,
+                    "identity already exists; refusing to overwrite and strand existing secrets"
+                        .to_string(),
+                )
+            } else {
+                at(key_path, e.to_string())
+            }
+        })
     }
 
     fn read_entries(&self) -> Result<Entries, SecretError> {
@@ -127,11 +161,78 @@ impl AgeFileBackend {
         writer.finish().map_err(|e| at(&self.path, e.to_string()))?;
 
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| at(&self.path, e.to_string()))?;
+            create_store_dir(parent).map_err(|e| at(&self.path, e.to_string()))?;
         }
-        std::fs::write(&self.path, &ciphertext).map_err(|e| at(&self.path, e.to_string()))?;
+        write_owner_only(&self.path, &ciphertext).map_err(|e| at(&self.path, e.to_string()))?;
+        // The mode above only applies to a file this call created; one that was
+        // already there keeps whatever it had, so it is narrowed here.
         restrict_permissions(&self.path)
     }
+}
+
+/// Create the directory the store lives in, owner-only.
+///
+/// `create_dir_all` applies the umask, so the ubiquitous `022` left this `0755`
+/// -- and the directory is the whole reason anything below it is out of reach,
+/// which is why `doctor` fails on anything but `0700`. A fresh install used to
+/// fail that check on permissions gitfriend itself had set.
+///
+/// Only a directory this call actually creates is closed down. `GITFRIEND_*`
+/// can point the store at a directory that already exists and belongs to
+/// something else -- chmodding *that* would be a side effect nobody asked for,
+/// and `doctor` is what reports one that has since drifted.
+#[cfg(unix)]
+fn create_store_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    // `mode` would apply to every directory a recursive create makes, so the
+    // parents are made at the default and only the leaf is narrowed.
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
+#[cfg(not(unix))]
+fn create_store_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
+}
+
+/// Ask for owner-only *at creation*, where the platform can express it.
+///
+/// The point is the ordering: `fs::write` then chmod leaves the file complete
+/// on disk at whatever the umask allows for the width of the chmod, and these
+/// are the identity key and every stored token. A descriptor opened in that
+/// window stays open afterwards.
+#[cfg(unix)]
+fn owner_only(options: &mut std::fs::OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    options.mode(0o600);
+}
+
+/// See [`restrict_permissions`]: nothing here can express it, and the gap is
+/// carried in [`Protection::HOST`] rather than papered over.
+#[cfg(not(unix))]
+fn owner_only(_options: &mut std::fs::OpenOptions) {}
+
+/// Write `contents` to a file that must not already exist.
+fn create_owner_only(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    owner_only(&mut options);
+    options.open(path)?.write_all(contents)
+}
+
+/// Write `contents`, replacing whatever was there.
+fn write_owner_only(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    owner_only(&mut options);
+    options.open(path)?.write_all(contents)
 }
 
 /// Errors describe the failure and the file, never a value.
@@ -153,6 +254,12 @@ fn restrict_permissions(path: &Path) -> Result<(), SecretError> {
         .map_err(|e| at(path, e.to_string()))
 }
 
+/// Nothing to do, and -- unlike `shim::make_executable`'s no-op, where a `.cmd`
+/// genuinely needs no bit -- that is a real loss, not an irrelevance. Writing
+/// Windows ACLs here would be unverifiable from this machine, and refusing to
+/// write at all would make the only usable backend there unusable. So the gap
+/// is carried in [`Protection::HOST`] and reported by `doctor` instead of being
+/// closed with code nobody has run.
 #[cfg(not(unix))]
 fn restrict_permissions(_path: &Path) -> Result<(), SecretError> {
     Ok(())
