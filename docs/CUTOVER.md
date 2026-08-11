@@ -380,6 +380,40 @@ curl -sI -H "Authorization: Bearer $TOKEN" https://api.github.com/user \
 `x-oauth-scopes` and no expiry means an OAuth token, which does not expire.
 `401` means dead.
 
+## Security posture, measured 2026-08-11
+
+Compared against git-credential-manager, which is what this replaces.
+
+**The one real gap.** `identity.key` sits beside `secrets.age`, both owned by
+you, so any process running as you reads both and decrypts. The encryption is
+nominal against a local-process threat. GCM stores in the login Keychain, where
+a *different* application must be ACL-authorised or macOS prompts. FileVault is
+On, which covers a powered-off disk, not this.
+
+Closing it means signing the binary with a stable identity and moving to the
+Keychain backend — it is implemented and behind the same trait; the only
+blocker was that an ad-hoc signature changes on every rebuild, which is what
+made macOS prompt. `examples/keychain_probe.rs` settles whether signing fixes
+it. See the dex task.
+
+**Where it is stronger than GCM.** No ambient tokens, and child processes are
+actively scrubbed. It refuses on an unclaimed host or a low-confidence
+resolution, where GCM serves whatever it holds for that host. And per-org
+selection across three GitHub accounts is the thing GCM cannot do at all —
+which is why this machine used `gh auth git-credential` before.
+
+**Hardening applied by hand.** The config directory was `0755` and
+`accounts.toml` was `0644`; both are now owner-only. `accounts.toml` matters
+because it is a redirect vector — whoever can write it can add a `match`
+pattern for their own host and be handed a token. Nothing yet stops a later
+`umask`, editor, or backup restore from loosening them silently; a `doctor`
+check is logged.
+
+**Not addressed.** Decrypted tokens are not zeroized in memory. Stored tokens
+are long-lived `gho_` OAuth tokens that never expire, so a stolen one is
+valuable indefinitely — the fine-grained PAT and GitHub App tasks are what
+reduce that.
+
 ## Things that will bite you
 
 - **The binary path is baked in.** Shims and wrapped MCP commands record the
