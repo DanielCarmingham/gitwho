@@ -187,7 +187,23 @@ do — recorded so it does not look alarming in `doctor` output later.
 gitfriend shim install --dir ~/.local/share/gitfriend/shims gh tea
 ```
 
-Put that directory **early** on `PATH` in `~/.zshenv`, before Homebrew.
+Put that directory on `PATH` — **as the last line of `~/.zshrc`**, not in
+`~/.zshenv`.
+
+This is the step that wasted the most time. `.zshenv` looks right, but `.zshrc`
+then prepends roughly fifteen more entries, `/opt/homebrew/bin` among them, so
+anything set in `.zshenv` ends up buried and the real `gh` wins. Keep a copy in
+`.zshenv` too — non-interactive shells never read `.zshrc` — but the `.zshrc`
+one is what actually takes effect.
+
+Two traps when testing it, both of which produced false passes here:
+
+- `zsh -l -c '...'` is **not interactive**, so it never reads `.zshrc` at all
+  and shows neither the shim nor anything `.zshrc.local` exports. Use
+  `zsh -l -i -c '...'`.
+- A shell **inherits** its parent's environment, so one launched from a session
+  that already holds tokens proves nothing about a fresh terminal. Test with
+  `env -i HOME=$HOME TERM=xterm PATH=/usr/bin:/bin zsh -l -i -c '...'`.
 
 **Verify** the identity follows the repo, not the shell:
 
