@@ -210,6 +210,11 @@ re-triggering it more often.
 behaviour matches the installed git's own config resolution, and one
 `git config` call is ~5 ms, inside budget.
 
+`init` sits above all of this and adds no capability of its own — it calls the
+same entry points in the order the setup guide gives, and owns only the two
+lines that live in files gitwho does not control. Keeping it a pure
+orchestrator is what makes it safe to re-run.
+
 ---
 
 ## Resolution

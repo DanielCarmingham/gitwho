@@ -139,7 +139,7 @@ fn has_windows_extension(name: &str) -> bool {
 /// The real binary's absolute path is baked in rather than re-resolved at run
 /// time: it makes the shim trivially readable, and a stale path is something
 /// `doctor` can detect, whereas a recursion loop is not.
-pub fn install(name: &str, shim_dir: &Path, path_var: &str) -> Result<PathBuf, ShimError> {
+pub fn install(name: &str, shim_dir: &Path, path_var: &str) -> Result<Installed, ShimError> {
     std::fs::create_dir_all(shim_dir).map_err(|source| ShimError::Write {
         path: shim_dir.to_path_buf(),
         source,
@@ -165,13 +165,34 @@ pub fn install(name: &str, shim_dir: &Path, path_var: &str) -> Result<PathBuf, S
     );
 
     let path = shim_dir.join(shim_file_name(name, target));
+
+    // Compare before writing, exactly as `sync::apply` does. A re-run that
+    // reported "wrote" for a file it did not change would make the report
+    // useless for spotting the one thing that *did* move.
+    if std::fs::read_to_string(&path).ok().as_deref() == Some(script.as_str()) {
+        return Ok(Installed {
+            path,
+            changed: false,
+        });
+    }
+
     std::fs::write(&path, script).map_err(|source| ShimError::Write {
         path: path.clone(),
         source,
     })?;
     make_executable(&path)?;
 
-    Ok(path)
+    Ok(Installed {
+        path,
+        changed: true,
+    })
+}
+
+/// Where a shim went, and whether writing it changed anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installed {
+    pub path: PathBuf,
+    pub changed: bool,
 }
 
 fn shell_quote(value: &str) -> String {

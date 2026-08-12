@@ -1,7 +1,7 @@
 //! CLI entry point.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{self, ExitCode};
 use std::sync::OnceLock;
 
@@ -45,6 +45,23 @@ enum Command {
         /// The command to run, after `--`.
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
+    },
+
+    /// Set up everything on a machine that has never run gitwho.
+    ///
+    /// Reports what it would do and stops, unless `--write` is given. Safe to
+    /// re-run: every step is idempotent, so this is also how you apply a newly
+    /// added account.
+    Init {
+        /// Apply the changes instead of only reporting them.
+        #[arg(long)]
+        write: bool,
+        /// Where to write the `gh`/`tea` wrappers.
+        #[arg(long)]
+        shim_dir: Option<PathBuf>,
+        /// Which CLIs to wrap. Names not found on PATH are skipped.
+        #[arg(long, value_delimiter = ',', default_value = "gh,tea")]
+        shims: Vec<String>,
     },
 
     /// Report whether the wiring is coherent. Read-only; changes nothing.
@@ -146,6 +163,17 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Init {
+            write,
+            shim_dir,
+            shims,
+        } => match init(write, shim_dir, &shims) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitwho: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Sync { dir, write } => match sync_config(dir, write) {
             Ok(code) => code,
             Err(message) => {
@@ -233,6 +261,227 @@ fn doctor_report() -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Everything the manual install did, in one idempotent command.
+///
+/// The order matters and is the order of the guide: the store must exist before
+/// a key can go in it, the config must be right before rules are generated from
+/// it, and the rules must exist before anything is told to include them.
+///
+/// It stops at the one step it cannot do for you. `accounts.toml` needs *your*
+/// accounts, and generating rules from a template of placeholders would produce
+/// a machine that looks configured and resolves everything to a fictional
+/// account -- working-but-wrong, which is the failure mode this project exists
+/// to prevent (R8).
+fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<ExitCode, String> {
+    let store = store_dir()?.clone();
+    let config_path = config_path()?;
+    let git_dir = path_from_env("GITWHO_GIT_DIR", "git")?;
+    let shim_dir = match shim_dir {
+        Some(dir) => dir,
+        None => default_shim_dir()?,
+    };
+
+    // --- 1. the store, and the key that unlocks it --------------------------
+    let choice = choose_backend(None)?;
+    if choice.kind == BackendKind::AgeFile {
+        let identity = identity_path()?;
+        if identity.exists() {
+            step("ok", format!("store {}", store.display()));
+        } else if write {
+            AgeFileBackend::generate_identity_file(&identity).map_err(|e| e.to_string())?;
+            step("created", format!("{} (owner-only)", identity.display()));
+        } else {
+            step("would create", format!("{}", identity.display()));
+        }
+    } else {
+        step("ok", format!("store: {} (no key file needed)", choice.kind.name()));
+    }
+
+    // --- 2. the config, which is where this stops ---------------------------
+    if !config_path.exists() {
+        if !write {
+            step("would create", format!("{} from the template", config_path.display()));
+            println!();
+            println!("nothing was written; re-run with --write to apply");
+            return Ok(ExitCode::SUCCESS);
+        }
+
+        write_owner_only(&config_path, gitwho::init::TEMPLATE)?;
+        step("created", format!("{}", config_path.display()));
+        println!();
+        println!("Now the part only you can do:");
+        println!();
+        println!("  1. edit {}", config_path.display());
+        println!("     replace the example accounts with yours");
+        println!("  2. gitwho secret set <Account> <VAR>    once per token");
+        println!("  3. gitwho init --write                  re-run to finish");
+        println!();
+        println!("Stopping here on purpose: generating rules from the template");
+        println!("would give you a machine that looks configured and resolves");
+        println!("every repository to an account that does not exist.");
+        return Ok(ExitCode::FAILURE);
+    }
+    step("ok", format!("{}", config_path.display()));
+
+    let config = Config::load(&config_path).map_err(|e| e.to_string())?;
+
+    // --- 3. the generated rules ---------------------------------------------
+    let gitwho_path = current_exe_path()?;
+    let plan = gitwho::sync::plan(&config, &git_dir, &gitwho_path);
+    if write {
+        let changed = gitwho::sync::apply(&plan).map_err(|e| e.to_string())?;
+        if changed.is_empty() {
+            step("ok", format!("rules in {}", git_dir.display()));
+        } else {
+            for path in &changed {
+                step("wrote", format!("{}", path.display()));
+            }
+        }
+    } else {
+        step(
+            "would write",
+            format!("{} files in {}", plan.files.len(), git_dir.display()),
+        );
+    }
+
+    // --- 4. the one line in your gitconfig ----------------------------------
+    let includes = git_dir.join("includes.gitconfig");
+    let snippet = gitwho::init::Snippet::gitconfig_include(&includes);
+    report_snippet(&gitconfig_path()?, &snippet, write)?;
+
+    // --- 5. the shims -------------------------------------------------------
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let mut installed_any = false;
+    for name in shims {
+        match gitwho::shim::install(name, &shim_dir, &path_var) {
+            Ok(installed) if write => {
+                installed_any = true;
+                let state = if installed.changed { "wrote" } else { "ok" };
+                step(state, format!("{}", installed.path.display()));
+            }
+            Ok(_) => {
+                installed_any = true;
+                step("would wrap", format!("{name} -> {}", shim_dir.display()));
+            }
+            // Not an error: wrapping a CLI you have not installed would create
+            // a shim pointing at nothing, which fails later and further away.
+            Err(gitwho::shim::ShimError::NotFound { .. }) => {
+                step("skipped", format!("{name} is not on PATH"));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    // --- 6. the line that puts them ahead of the real ones ------------------
+    if installed_any {
+        let snippet = gitwho::init::Snippet::path_export(&shim_dir);
+        report_snippet(&shell_rc_path()?, &snippet, write)?;
+    }
+
+    if !write {
+        println!();
+        println!("nothing was written; re-run with --write to apply");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!();
+    doctor_report()
+}
+
+/// Print one aligned step line. Every step says what happened, including
+/// "nothing, it was already right" -- a silent step is indistinguishable from a
+/// skipped one.
+fn step(state: &str, detail: String) {
+    println!("{state:<13} {detail}");
+}
+
+/// Handle one of the two files gitwho does not own.
+fn report_snippet(
+    path: &Path,
+    snippet: &gitwho::init::Snippet,
+    write: bool,
+) -> Result<(), String> {
+    use gitwho::init::Applied;
+
+    let applied = gitwho::init::ensure(path, snippet, write)
+        .map_err(|e| format!("cannot update {}: {e}", path.display()))?;
+
+    match applied {
+        Applied::AlreadyPresent => step("ok", format!("{} ({})", path.display(), snippet.purpose)),
+        Applied::Appended => step("appended", format!("{} ({})", path.display(), snippet.purpose)),
+        Applied::WouldAppend => step(
+            "would append",
+            format!("{} ({})", path.display(), snippet.purpose),
+        ),
+        Applied::FileMissing => {
+            step("missing", format!("{} -- add this yourself:", path.display()));
+            for line in snippet.text.lines().filter(|l| !l.trim().is_empty()) {
+                println!("               {line}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn current_exe_path() -> Result<String, String> {
+    Ok(std::env::current_exe()
+        .map_err(|e| format!("cannot find my own path: {e}"))?
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// Written at `0600` for the same reason the guide says to: `accounts.toml` is a
+/// redirect vector. Whoever can write it can add a `match` for a host they
+/// control and be handed one of your tokens.
+fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
+    std::fs::write(path, contents).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot secure {}: {e}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+/// `$HOME/.gitconfig`. Not `git config --global --edit`'s idea of it: that can
+/// be `$XDG_CONFIG_HOME/git/config`, and appending to the wrong one of the two
+/// is a silent no-op.
+fn gitconfig_path() -> Result<PathBuf, String> {
+    let home = home_dir()?;
+    let xdg = home.join(".config/git/config");
+    if xdg.exists() {
+        return Ok(xdg);
+    }
+    Ok(home.join(".gitconfig"))
+}
+
+/// The rc file a shim `PATH` line belongs in.
+///
+/// `.zshrc` rather than `.zshenv` on purpose -- see `Snippet::path_export`.
+fn shell_rc_path() -> Result<PathBuf, String> {
+    let home = home_dir()?;
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    Ok(if shell.ends_with("bash") {
+        home.join(".bashrc")
+    } else {
+        home.join(".zshrc")
+    })
+}
+
+fn default_shim_dir() -> Result<PathBuf, String> {
+    Ok(home_dir()?.join(".local/share/gitwho/shims"))
+}
+
+fn home_dir() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| "neither HOME nor USERPROFILE is set".to_string())
+}
+
 fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
     let dir = match dir {
@@ -240,7 +489,12 @@ fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
         None => path_from_env("GITWHO_GIT_DIR", "git")?,
     };
 
-    let plan = gitwho::sync::plan(&config, &dir);
+    let gitwho_path = std::env::current_exe()
+        .map_err(|e| format!("cannot find my own path: {e}"))?
+        .to_string_lossy()
+        .into_owned();
+
+    let plan = gitwho::sync::plan(&config, &dir, &gitwho_path);
 
     if !write {
         for file in &plan.files {
@@ -477,7 +731,7 @@ fn shim(action: ShimAction) -> Result<(), String> {
             for name in &names {
                 let written = gitwho::shim::install(name, &dir, &path_var)
                     .map_err(|e| e.to_string())?;
-                println!("{}", written.display());
+                println!("{}", written.path.display());
             }
             Ok(())
         }

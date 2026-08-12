@@ -32,7 +32,13 @@ pub struct Plan {
 }
 
 /// Work out every file that should exist, without touching the disk.
-pub fn plan(config: &Config, dir: &Path) -> Plan {
+///
+/// `gitwho` is the absolute path of this binary, baked into the credential
+/// helper lines. It is a parameter rather than a `current_exe()` call in here
+/// so the generated text is a pure function of its inputs and a test can assert
+/// on an exact string. The same baked-path hazard applies as to
+/// [`shim::install`](crate::shim::install): move the binary and re-run.
+pub fn plan(config: &Config, dir: &Path, gitwho: &str) -> Plan {
     let mut files = Vec::new();
 
     for account in &config.accounts {
@@ -43,11 +49,78 @@ pub fn plan(config: &Config, dir: &Path) -> Plan {
     }
 
     files.push(GeneratedFile {
+        path: dir.join(CREDENTIALS_FILE),
+        contents: credentials_file(config, gitwho),
+    });
+
+    files.push(GeneratedFile {
         path: dir.join("includes.gitconfig"),
         contents: includes_file(config, dir),
     });
 
     Plan { files }
+}
+
+const CREDENTIALS_FILE: &str = "credentials.gitconfig";
+
+/// The hosts gitwho serves credentials for, in declaration order, deduplicated.
+///
+/// Only accounts that declare a `gitCredential` contribute. An account that
+/// only ever uses ssh has no token to serve, and claiming its host would mean
+/// answering a fill request with nothing -- which reads to git as a failure
+/// rather than as "not mine" (R7).
+fn served_hosts(config: &Config) -> Vec<&str> {
+    let mut hosts: Vec<&str> = Vec::new();
+
+    for account in &config.accounts {
+        if account.git_credential.is_none() {
+            continue;
+        }
+        for pattern in &account.match_patterns {
+            let host = pattern.split('/').next().unwrap_or(pattern);
+            if !host.is_empty() && !hosts.contains(&host) {
+                hosts.push(host);
+            }
+        }
+    }
+
+    hosts
+}
+
+/// The `[credential]` sections, which used to be transcribed by hand.
+///
+/// Three details here are load-bearing, and each fails *silently* when it is
+/// wrong -- which is the whole reason this is generated rather than documented:
+///
+/// - **The empty `helper =` is a reset, not a helper.** It clears everything
+///   configured before it. Without it this appends to a list, and whatever ran
+///   first still answers.
+/// - **A url-scoped section overrides the general helper list outright.** So
+///   setting only the global `credential.helper` achieves nothing once one of
+///   these exists -- and, conversely, these leave other hosts alone.
+/// - **`useHttpPath = true` is mandatory for multi-account hosts.** Without it
+///   git passes `github.com` and nothing more, so every account on that host
+///   resolves identically: a total and silent failure.
+fn credentials_file(config: &Config, gitwho: &str) -> String {
+    let mut out = String::from(HEADER);
+    out.push_str(
+        "#\n\
+         # Credential helper wiring, one section per host any account claims.\n\
+         # Hosts not listed here are left to whatever you already configured.\n",
+    );
+
+    for host in served_hosts(config) {
+        out.push_str(&format!("\n[credential \"https://{host}\"]\n"));
+        // Empty value first: this is a reset of the helper list, so a
+        // previously configured helper cannot answer ahead of gitwho.
+        out.push_str("\thelper =\n");
+        out.push_str(&format!("\thelper = {gitwho} credential\n"));
+        // Without this the helper is told the host and nothing else, so every
+        // account on it resolves the same way.
+        out.push_str("\tuseHttpPath = true\n");
+    }
+
+    out
 }
 
 fn identity_file(config: &Config, account: &Account) -> String {
@@ -78,8 +151,18 @@ fn includes_file(config: &Config, dir: &Path) -> String {
     out.push_str(
         "# Include this from your main gitconfig:\n\
          #     [include]\n\
-         #         path = <this file>\n\n",
+         #         path = <this file>\n\
+         #\n\
+         # That one line is the whole hookup. Everything else gitwho generates\n\
+         # is reached from here, so removing it hands control straight back.\n\n",
     );
+
+    // Unconditional, and first: these are `[credential]` sections rather than
+    // `includeIf` rules, so they do not compete with the identity rules below
+    // and there is nothing to order them against.
+    out.push_str("# Which helper answers for which host.\n");
+    out.push_str("[include]\n");
+    out.push_str(&format!("\tpath = {}\n\n", dir.join(CREDENTIALS_FILE).display()));
 
     // Path rules first. Git applies includes in order and the last match wins,
     // so putting URL rules afterwards lets the remote -- the better evidence --

@@ -23,9 +23,18 @@ const ACCOUNTS: &str = r#"
     match = ["github.com/WorkOrg/**"]
 "#;
 
+/// The binary path baked into generated config. A parameter rather than
+/// `current_exe()` inside `sync`, so a test can assert on an exact string
+/// instead of on whatever the test harness happens to be called.
+const BINARY: &str = "/home/someone/.local/bin/gitwho";
+
 fn generate() -> sync::Plan {
     let config = Config::parse(ACCOUNTS).unwrap();
-    sync::plan(&config, std::path::Path::new("/home/x/.config/gitwho/git"))
+    sync::plan(
+        &config,
+        std::path::Path::new("/home/x/.config/gitwho/git"),
+        BINARY,
+    )
 }
 
 fn file<'a>(plan: &'a sync::Plan, name: &str) -> &'a str {
@@ -166,7 +175,7 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
     )
     .unwrap();
 
-    let plan = sync::plan(&config, &git_dir);
+    let plan = sync::plan(&config, &git_dir, BINARY);
     sync::apply(&plan).unwrap();
 
     let repo = dir.path().join("repo");
@@ -206,5 +215,168 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
     assert_eq!(
         email, "you@example.net",
         "git did not select the SelfHosted identity for an scp remote with a non-git user"
+    );
+}
+
+// --- Credential sections -----------------------------------------------------
+//
+// The hand-written gitconfig block these replace was the most error-prone step
+// of the install: three separate details, each of which fails silently.
+
+/// Without `useHttpPath`, git tells the helper `github.com` and nothing more,
+/// so every account on that host resolves identically. The empty `helper =` is
+/// a reset: without it this appends to a list and whatever ran first still
+/// answers.
+#[test]
+fn a_credential_section_carries_the_reset_the_helper_and_the_http_path() {
+    let plan = generate();
+    let creds = file(&plan, "credentials.gitconfig");
+
+    let section = creds
+        .split("[credential ")
+        .find(|s| s.starts_with("\"https://github.com\"]"))
+        .expect("expected a section for github.com");
+
+    assert!(
+        section.contains("\n\thelper =\n"),
+        "the empty reset must come first, or a previously configured helper still answers; got:\n{section}"
+    );
+    assert!(
+        section.contains(&format!("helper = {BINARY} credential")),
+        "the helper must name the absolute path of the binary that generated it; got:\n{section}"
+    );
+    assert!(
+        section.contains("useHttpPath = true"),
+        "without useHttpPath the org never reaches the helper and every account on the host resolves the same; got:\n{section}"
+    );
+}
+
+/// R7: an account that only ever uses ssh is not made to invent a token, so it
+/// contributes no credential section at all.
+#[test]
+fn an_account_with_no_git_credential_claims_no_host() {
+    let config = Config::parse(
+        r#"
+        [defaults]
+        account = "SshOnly"
+
+        [[accounts]]
+        name = "SshOnly"
+        provider = "gitea"
+        email = "you@example.net"
+        sshKey = "~/.ssh/id_ed25519_selfhosted"
+        match = ["ssh.git.example.net/**"]
+    "#,
+    )
+    .unwrap();
+
+    let plan = sync::plan(&config, std::path::Path::new("/tmp/git"), BINARY);
+    let creds = file(&plan, "credentials.gitconfig");
+
+    assert!(
+        !creds.contains("ssh.git.example.net"),
+        "an ssh-only account must not be given a credential section; got:\n{creds}"
+    );
+}
+
+/// Two accounts on one host is the case this whole project exists for. Git
+/// takes the last matching section, so emitting the host twice would make the
+/// second silently shadow the first -- and both say the same thing anyway,
+/// since the helper resolves the account from the path git passes it.
+#[test]
+fn two_accounts_on_one_host_produce_one_section() {
+    let plan = generate();
+    let creds = file(&plan, "credentials.gitconfig");
+
+    assert_eq!(
+        creds.matches("[credential \"https://github.com\"]").count(),
+        1,
+        "github.com should appear exactly once; got:\n{creds}"
+    );
+}
+
+/// The whole point of generating this file is that the user still adds exactly
+/// one line to their own gitconfig. If it is not reachable from the file they
+/// include, it does nothing.
+#[test]
+fn the_credential_file_is_reachable_from_the_one_included_file() {
+    let plan = generate();
+    let includes = file(&plan, "includes.gitconfig");
+
+    assert!(
+        includes.contains("credentials.gitconfig"),
+        "includes.gitconfig must pull in the credential sections; got:\n{includes}"
+    );
+}
+
+/// Same reasoning as the identity test above: ask real git which helper it
+/// would actually use, rather than trusting that the text we generated means
+/// what we think. `--get-urlmatch` is how git itself resolves a url-scoped
+/// section, so this exercises the precedence rule the hand-written version got
+/// wrong.
+#[test]
+fn git_resolves_the_generated_credential_section_for_a_real_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let git_dir = dir.path().join("git");
+
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let plan = sync::plan(&config, &git_dir, BINARY);
+    sync::apply(&plan).unwrap();
+
+    let global = dir.path().join("global.gitconfig");
+    std::fs::write(
+        &global,
+        format!(
+            // A pre-existing general helper, because that is the situation
+            // anyone installing this is actually in. It must lose.
+            "[credential]\n\thelper = some-other-manager\n[include]\n\tpath = {}\n",
+            git_dir.join("includes.gitconfig").display()
+        ),
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    let helpers = git(&[
+        "config",
+        "--get-urlmatch",
+        "credential.helper",
+        "https://github.com/WorkOrg/thing.git",
+    ]);
+    assert_eq!(
+        helpers,
+        format!("{BINARY} credential"),
+        "git should resolve a claimed host to gitwho alone -- the reset must have cleared the pre-existing helper"
+    );
+
+    assert_eq!(
+        git(&[
+            "config",
+            "--get-urlmatch",
+            "credential.useHttpPath",
+            "https://github.com/WorkOrg/thing.git",
+        ]),
+        "true",
+        "without useHttpPath the org never reaches the helper"
+    );
+
+    // A host nobody claimed must be left exactly as it was.
+    assert_eq!(
+        git(&[
+            "config",
+            "--get-urlmatch",
+            "credential.helper",
+            "https://gitlab.example.com/someone/thing.git",
+        ]),
+        "some-other-manager",
+        "an unclaimed host must keep whatever was already configured"
     );
 }

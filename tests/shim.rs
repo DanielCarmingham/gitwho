@@ -128,3 +128,34 @@ fn find_real_binary_still_ignores_the_shim_directory() {
 
     assert_eq!(found.as_deref(), Some(real_dir.join("gh").as_path()));
 }
+
+/// A re-run that reports "wrote" for a file it did not change makes the report
+/// useless for spotting the one thing that *did* move -- and `gitwho init` is
+/// meant to be re-run every time an account is added.
+#[cfg(unix)]
+#[test]
+fn installing_the_same_shim_twice_reports_the_second_as_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let real_dir = dir.path().join("bin");
+    let shim_dir = dir.path().join("shims");
+    std::fs::create_dir_all(&real_dir).unwrap();
+
+    let real = real_dir.join("gh");
+    std::fs::write(&real, "#!/bin/sh\nexit 0\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let path_var = real_dir.display().to_string();
+
+    let first = gitwho::shim::install("gh", &shim_dir, &path_var).unwrap();
+    assert!(first.changed, "the first install must write");
+
+    let second = gitwho::shim::install("gh", &shim_dir, &path_var).unwrap();
+    assert!(
+        !second.changed,
+        "an identical second install must report no change"
+    );
+    assert_eq!(first.path, second.path);
+}

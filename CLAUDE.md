@@ -13,7 +13,7 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
-and MCP wrapping all route real traffic. 118 tests, clippy clean.
+and MCP wrapping all route real traffic. 139 tests, clippy clean.
 
 **Verified on macOS only.** Linux is plausible and untried: the default secret
 store is an age file rather than the Keychain, and the shims are plain
@@ -134,7 +134,7 @@ these:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 118 pass, 1 ignored
+cargo test                              # 138 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

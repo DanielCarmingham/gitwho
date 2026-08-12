@@ -57,16 +57,35 @@ cd gitwho
 cargo install --path . --locked
 ```
 
-The binary alone does nothing — the account rules, the secret store and the git
-wiring are all setup. **[docs/INSTALL.md](docs/INSTALL.md)** walks through it
-with a verification at each step, plus what a second machine can and cannot
-restore from your dotfiles.
+## Quick start
+
+```sh
+gitwho init             # dry run: lists every step, writes nothing
+gitwho init --write     # creates the store, scaffolds accounts.toml, stops
+```
+
+It stops there on purpose, because the next part is the one thing it cannot do
+for you: put your accounts in `~/.config/gitwho/accounts.toml`. Then
+
+```sh
+gitwho secret set Work GH_TOKEN    # once per token; the value never enters argv
+gitwho init --write                # finishes, and ends by running doctor
+```
+
+`init` is idempotent — re-run it whenever you add an account. Every step
+reports `ok` when there was nothing to do, so a second run tells you exactly
+what changed.
+
+**[docs/INSTALL.md](docs/INSTALL.md)** covers what `init` does, how to do each
+piece by hand, the checks that prove it works, and the two test commands that
+produce false passes.
 
 ## Commands
 
 ```
+gitwho init          set everything up; safe to re-run
 gitwho doctor        report whether the wiring is coherent (read-only)
-gitwho sync          generate the identity rules
+gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
 gitwho shim install  wrapper scripts for gh / tea
@@ -74,14 +93,14 @@ gitwho secret …      store tokens; only fingerprints are ever printed
 gitwho mcp sync      route provider MCP servers through exec
 ```
 
-`doctor` is the one to run first and after any change. It is read-only, exits
-non-zero on problems, and never prints a secret value.
+`doctor` is the one to run after any change. It is read-only, exits non-zero on
+problems, and never prints a secret value.
 
 ## Status
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 118 tests, clippy clean.
+no longer exports a token per directory. 139 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that
@@ -93,7 +112,7 @@ easy to paper over:
 
 | | |
 |---|---|
-| macOS | verified — everything below has actually been run |
+| macOS | verified — this is where it runs every day |
 | Linux | plausible, untried. The default secret store is an age-encrypted file, not the Keychain, and the shims are plain `#!/bin/sh` |
 | Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 

@@ -3,6 +3,7 @@ pub mod credential;
 pub mod doctor;
 pub mod exec;
 pub mod git;
+pub mod init;
 pub mod mcp;
 pub mod paths;
 pub mod resolve;
