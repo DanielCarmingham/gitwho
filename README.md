@@ -48,14 +48,42 @@ host can be told apart — by organisation, with no directory layout implied.
 
 ## Install
 
-Needs a Rust toolchain and git ≥ 2.36 (for `includeIf
-"hasconfig:remote.*.url:"`).
+macOS and Linux, on x86-64 and arm64. Every route puts a `gitwho` binary in
+`~/.cargo/bin`, so whichever you pick, that directory needs to be on your
+`PATH`. You also need **git ≥ 2.36** — `includeIf "hasconfig:remote.*.url:"`
+landed there.
+
+**Homebrew**
+
+```sh
+brew install DanielCarmingham/tap/gitwho
+```
+
+**One line, no package manager:**
+
+```sh
+curl -LsSf https://github.com/DanielCarmingham/gitwho/releases/latest/download/gitwho-installer.sh | sh
+```
+
+**Cargo**, if you already have a Rust toolchain:
+
+```sh
+cargo install gitwho              # compiles it, a couple of minutes
+cargo binstall gitwho             # or grab the same prebuilt binary, seconds
+```
+
+**From source**, which is what you want if you are going to change it:
 
 ```sh
 git clone https://github.com/DanielCarmingham/gitwho
 cd gitwho
 cargo install --path . --locked
 ```
+
+The first three need no Rust toolchain at all. Whichever you use, **pick the
+location once and leave it alone**: `init`, `sync` and `shim install` bake the
+binary's absolute path into what they generate, so moving it later breaks that
+config silently.
 
 ## Quick start
 
