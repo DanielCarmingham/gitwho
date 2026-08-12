@@ -18,17 +18,17 @@ const ACCOUNTS: &str = r#"
     env = ["GH_TOKEN"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://app-gitea.digilope.com/api/v1"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
+    env = ["GITEA_TOKEN", "GITEA_HOST=https://ssh.git.example.net/api/v1"]
 "#;
 
 fn backend() -> EnvBackend {
     EnvBackend::from_map(HashMap::from([
         ("GH_TOKEN_Personal".to_string(), "personal-token".to_string()),
-        ("GITEA_TOKEN_Digilope".to_string(), "gitea-token".to_string()),
+        ("GITEA_TOKEN_SelfHosted".to_string(), "gitea-token".to_string()),
     ]))
 }
 
@@ -49,9 +49,9 @@ fn variables_belonging_to_other_accounts_are_scrubbed() {
     // chosen account -- the account being run knows what it needs, not what
     // it must be protected from (R11).
     let config = Config::parse(ACCOUNTS).unwrap();
-    let digilope = config.account("Digilope").unwrap();
+    let selfhosted = config.account("SelfHosted").unwrap();
 
-    let plan = plan_env(&config, &backend(), digilope).unwrap();
+    let plan = plan_env(&config, &backend(), selfhosted).unwrap();
 
     assert!(
         plan.remove.contains("GH_TOKEN"),
@@ -69,9 +69,9 @@ fn a_scrubbed_variable_the_account_needs_is_still_set() {
     // GITEA_TOKEN appears in the managed set, so it is scrubbed -- and then
     // set. Order matters: clear everything managed, then populate.
     let config = Config::parse(ACCOUNTS).unwrap();
-    let digilope = config.account("Digilope").unwrap();
+    let selfhosted = config.account("SelfHosted").unwrap();
 
-    let plan = plan_env(&config, &backend(), digilope).unwrap();
+    let plan = plan_env(&config, &backend(), selfhosted).unwrap();
 
     assert_eq!(
         plan.set.get("GITEA_TOKEN").map(String::as_str),
@@ -79,7 +79,7 @@ fn a_scrubbed_variable_the_account_needs_is_still_set() {
     );
     assert_eq!(
         plan.set.get("GITEA_HOST").map(String::as_str),
-        Some("https://app-gitea.digilope.com/api/v1"),
+        Some("https://ssh.git.example.net/api/v1"),
         "a literal VAR=value entry should pass through unchanged"
     );
 }

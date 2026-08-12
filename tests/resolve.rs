@@ -20,7 +20,7 @@ const TWO_GITHUB_ACCOUNTS: &str = r#"
     match = ["github.com/WorkOrg/**"]
 "#;
 
-/// Digilope's remotes look like `gitea@app-gitea.digilope.com:daniel/repo.git`
+/// SelfHosted's remotes look like `gitea@ssh.git.example.net:someone/repo.git`
 /// -- scp-style, no scheme, `:` instead of `/`, and a user prefix.
 const SSH_ACCOUNT: &str = r#"
     [defaults]
@@ -33,30 +33,30 @@ const SSH_ACCOUNT: &str = r#"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
 "#;
 
-/// The real nesting hazard: KitchenCloud's org sits inside the pattern that
-/// covers Profound, so both accounts match. Declared broad-first on purpose --
+/// The real nesting hazard: AcmeKitchen's org sits inside the pattern that
+/// covers Acme, so both accounts match. Declared broad-first on purpose --
 /// the answer must not depend on declaration order.
 const OVERLAPPING_ACCOUNTS: &str = r#"
     [defaults]
     account = "Personal"
 
     [[accounts]]
-    name = "Profound"
+    name = "Acme"
     provider = "github"
-    email = "me@profound.example"
-    match = ["github.com/Profound-*/**"]
+    email = "you@acme.example"
+    match = ["github.com/acme-*/**"]
 
     [[accounts]]
-    name = "KitchenCloud"
+    name = "AcmeKitchen"
     provider = "github"
-    email = "me@kitchencloud.example"
-    match = ["github.com/Profound-Kitchen/**"]
+    email = "you@kitchen.example"
+    match = ["github.com/acme-kitchen/**"]
 "#;
 
 /// Two accounts claiming the same org with equal specificity. There is no
@@ -96,18 +96,18 @@ fn equally_specific_matches_on_different_accounts_are_an_error() {
 fn the_more_specific_pattern_wins_when_two_accounts_match() {
     let config = Config::parse(OVERLAPPING_ACCOUNTS).unwrap();
 
-    let resolved = resolve_url(&config, "https://github.com/Profound-Kitchen/app.git").unwrap();
+    let resolved = resolve_url(&config, "https://github.com/acme-kitchen/app.git").unwrap();
 
-    assert_eq!(resolved.account.name, "KitchenCloud");
+    assert_eq!(resolved.account.name, "AcmeKitchen");
 }
 
 #[test]
 fn resolves_an_scp_style_ssh_url() {
     let config = Config::parse(SSH_ACCOUNT).unwrap();
 
-    let resolved = resolve_url(&config, "gitea@app-gitea.digilope.com:daniel/site.git").unwrap();
+    let resolved = resolve_url(&config, "gitea@ssh.git.example.net:someone/site.git").unwrap();
 
-    assert_eq!(resolved.account.name, "Digilope");
+    assert_eq!(resolved.account.name, "SelfHosted");
     assert_eq!(resolved.reason, Reason::UrlMatch);
 }
 

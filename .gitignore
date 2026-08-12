@@ -1,5 +1,15 @@
 # Rust
 /target/
+# Not a typo: macOS excludes `*.noindex` from Spotlight, so a second build
+# directory under that name keeps mds_stores off a tree it re-scans constantly.
+/target.noindex/
+
+# jj keeps its own state beside .git in a colocated repo.
+/.jj/
+
+# Local task tracker state. Useful to whoever is working here, noise to
+# everyone else.
+/.dex/
 
 # Claude Code local (per-machine permissions, not shared)
 .claude/settings.local.json

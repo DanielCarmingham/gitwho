@@ -1,12 +1,12 @@
 use gitwho::mcp;
 
-/// The shape of the real file in `Digilope/one-drop-visuals`: a provider MCP
-/// with no `env` block at all, so it inherits whatever the shell had.
+/// The shape found in the wild, and the reason this module exists: a provider
+/// MCP with no `env` block at all, so it inherits whatever the shell had.
 const REAL_SHAPE: &str = r#"{
   "mcpServers": {
     "gitea": {
       "type": "stdio",
-      "command": "/Users/daniel/Developer/claude/gitea-mcp_Darwin_arm64/gitea-mcp",
+      "command": "/opt/mcp/gitea-mcp",
       "args": ["-d"]
     },
     "sequential-thinking": {
@@ -32,7 +32,7 @@ fn wraps_a_provider_server_so_it_launches_through_exec() {
         serde_json::json!([
             "exec",
             "--",
-            "/Users/daniel/Developer/claude/gitea-mcp_Darwin_arm64/gitea-mcp",
+            "/opt/mcp/gitea-mcp",
             "-d"
         ])
     );
@@ -96,7 +96,7 @@ fn a_server_with_no_provider_marker_is_not_touched() {
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/daniel"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/someone"]
     }
   }
 }"#;

@@ -1,9 +1,10 @@
 //! Rewriting `.mcp.json` so provider MCP servers launch through `exec`.
 //!
 //! An MCP server is a long-lived process started by an editor or agent, and it
-//! inherits that launcher's environment wholesale. `Digilope/one-drop-visuals`
-//! runs `gitea-mcp` with no `env` block at all today, which means it holds
-//! whatever credential happened to be ambient when Claude Code started.
+//! inherits that launcher's environment wholesale. A `.mcp.json` that runs
+//! `gitea-mcp` with no `env` block -- the common case, and the one this was
+//! written against -- therefore holds whatever credential happened to be
+//! ambient when the editor started, for as long as the editor runs.
 //!
 //! Wrapping the command rather than writing an `env` block is deliberate:
 //! these files are usually committed, and a token in one would be a secret in

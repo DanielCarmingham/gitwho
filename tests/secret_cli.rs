@@ -17,11 +17,11 @@ const ACCOUNTS: &str = r#"
     env = ["GH_TOKEN"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://app-gitea.digilope.com/api/v1"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
+    env = ["GITEA_TOKEN", "GITEA_HOST=https://ssh.git.example.net/api/v1"]
 "#;
 
 fn setup(dir: &Path) {
@@ -270,7 +270,7 @@ fn import_from_the_environment_preserves_the_value() {
 
     let imported = gitwho(dir.path(), &["secret", "import", "--from-env"])
         .env("GH_TOKEN_Personal", "existing-personal-token")
-        .env("GITEA_TOKEN_Digilope", "existing-gitea-token")
+        .env("GITEA_TOKEN_SelfHosted", "existing-gitea-token")
         .output()
         .unwrap();
     assert!(

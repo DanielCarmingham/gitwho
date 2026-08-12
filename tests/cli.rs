@@ -252,10 +252,10 @@ const EXEC_ACCOUNTS: &str = r#"
     env = ["GH_TOKEN"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
     env = ["GITEA_TOKEN"]
 "#;
 
@@ -265,7 +265,7 @@ fn exec_fixture(dir: &Path) {
     AgeFileBackend::generate_identity_file(&key_path).unwrap();
     let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
     backend.set("Personal", "GH_TOKEN", "personal-token").unwrap();
-    backend.set("Digilope", "GITEA_TOKEN", "gitea-token").unwrap();
+    backend.set("SelfHosted", "GITEA_TOKEN", "gitea-token").unwrap();
 }
 
 fn repo_for(dir: &Path, name: &str, origin: &str) -> std::path::PathBuf {
@@ -294,8 +294,8 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
     exec_fixture(dir.path());
     let repo = repo_for(
         dir.path(),
-        "digilope-repo",
-        "gitea@app-gitea.digilope.com:daniel/site.git",
+        "selfhosted-repo",
+        "gitea@ssh.git.example.net:someone/site.git",
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_gitwho"))
@@ -330,8 +330,8 @@ fn a_generated_shim_routes_a_cli_through_exec() {
     exec_fixture(dir.path());
     let repo = repo_for(
         dir.path(),
-        "digilope-repo",
-        "gitea@app-gitea.digilope.com:daniel/site.git",
+        "selfhosted-repo",
+        "gitea@ssh.git.example.net:someone/site.git",
     );
     let shim_dir = dir.path().join("shims");
 

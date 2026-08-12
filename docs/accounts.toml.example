@@ -1,88 +1,121 @@
 # Starting point for ~/.config/gitwho/accounts.toml.
 #
-# Not a hypothetical example: the match patterns were derived on 2026-08-09 by
-# reading the origin remote of every repository under ~/Developer, so they
-# cover the orgs actually in use. Re-check them if that has changed --
-# docs/CUTOVER.md step 1.
+# Replace every value below. The three accounts here are archetypes, not
+# defaults: a personal account, a work account distinguished by organisation
+# rather than by host, and a self-hosted Gitea/Forgejo account that uses ssh
+# and https at the same time.
 #
-# Contains no secrets. `env` and `gitCredential` name variables; the values
-# live in the age-encrypted store (R10).
+# Contains no secrets, and must not. `env` and `gitCredential` name variables;
+# the values live in the secret store (`gitwho secret set`). That separation is
+# what lets this file be committed to a dotfiles repo.
 #
-# Known gap: ~12 clones of other people's repositories under
-# ~/Developer/DanielCarmingham (microsoft, dotnet, charmbracelet, ghostty-org)
-# match nothing here on purpose. They resolve to the default account tagged
-# Unmatched -- `gh` works, the credential helper still refuses.
+# Copy it into place with mode 0600:
+#
+#     gitwho secret init
+#     cp docs/accounts.toml.example ~/.config/gitwho/accounts.toml
+#     chmod 600 ~/.config/gitwho/accounts.toml
+#
+# The chmod is not hygiene, it is the point. This file is a redirect vector:
+# whoever can write it can add a `match` pattern for a host they control and be
+# handed one of your tokens.
 
 [defaults]
-account = "DanielCarmingham"
-gitName = "Daniel Carmingham"
+# Used when nothing else matches. Declared rather than emergent -- a repo that
+# matches no account resolves here and is tagged `Unmatched`, which `gh` will
+# work with while the credential helper refuses. That asymmetry is deliberate:
+# a wrong account served quietly is the failure this tool exists to prevent.
+account = "Personal"
+
+# The author name for every account that does not override it. It is usually
+# the same person throughout and only the address differs, so it lives here
+# once. An account with neither this nor its own `gitName` generates an empty
+# `name = `, which makes every commit in that repo fail; `doctor` checks for it.
+gitName = "Your Name"
+
+# Which store holds the values on this machine: `age` (default, everywhere) or
+# `keychain`. Leave it unset unless you have run examples/keychain_probe.rs and
+# confirmed the platform store does not re-prompt after a rebuild.
+# secretBackend = "age"
+
+
+# --- A personal account ------------------------------------------------------
 
 [[accounts]]
-name = "DanielCarmingham"
+name = "Personal"
+# Required by the parser, but currently read by nothing: `mcp sync` recognises
+# provider servers from their command, not from this field. Write the obvious
+# value and do not expect it to change any behaviour.
 provider = "github"
-email = "15822947+DanielCarmingham@users.noreply.github.com"
+email = "you@example.com"
+
+# Names the variable holding the token git authenticates with. Not inferred
+# from `provider`, because an account may hold several credentials and guessing
+# which one is the git password is exactly the kind of implicit behaviour that
+# goes wrong quietly.
 gitCredential = "GH_TOKEN"
-sshKey = "~/.ssh/id_ed25519_github_DanielCarmingham"
-match = ["github.com/DanielCarmingham/**"]
-paths = ["/Users/daniel/Developer/DanielCarmingham/"]
+
+# Written into `core.sshcommand` for this account. Optional and independent of
+# `gitCredential` -- an account may have both, either, or neither.
+sshKey = "~/.ssh/id_ed25519_personal"
+
+# The real work. Matched against `host/path` of the remote URL, so this is what
+# makes identity follow the *repository* rather than its location: it holds for
+# a clone made anywhere and for a worktree in a foreign root.
+match = ["github.com/your-username/**"]
+
+# What `gitwho exec` injects, and therefore what the `gh`/`tea` shims see. A
+# bare NAME fetches a secret; NAME=value is a literal, for non-secret settings.
 env = ["GH_TOKEN"]
 
+# Consulted **only** for a repo with no remote yet -- a fresh `git init`.
+# Anything with a remote is settled by `match` above, so these prefixes do not
+# constrain where you keep your repositories.
+paths = ["~/src/personal/"]
+
+
+# --- A work account on the same host -----------------------------------------
+#
+# This is the case path-based `includeIf "gitdir:"` rules cannot express: two
+# accounts on github.com, told apart by organisation. Because `match` runs
+# against `host/path`, listing the orgs is enough -- no directory layout is
+# implied and none is required.
+
 [[accounts]]
-name = "DanielAtProfound"
+name = "Work"
 provider = "github"
-email = "daniel@profoundcollective.com"
+email = "you@example-corp.com"
+gitName = "Your Name (Example Corp)"      # overrides [defaults] gitName
 gitCredential = "GH_TOKEN"
-# Seven distinct orgs live under ~/Developer/Profound today.
 match = [
-    "github.com/DanielAtProfound/**",
-    "github.com/profoundcollective/**",
-    "github.com/profound-rj/**",
-    "github.com/EJ-Rice/**",
-    "github.com/AquaTraction/**",
-    "github.com/Composite-Labs/**",
+    "github.com/example-corp/**",
+    "github.com/example-corp-labs/**",
 ]
-paths = ["/Users/daniel/Developer/Profound/"]
 env = ["GH_TOKEN"]
+paths = ["~/src/work/"]
+
+
+# --- A self-hosted Gitea / Forgejo account -----------------------------------
+#
+# Two hostnames, one account. Transport is a property of a *remote*, not of an
+# account: git picks it per remote, and a credential helper is only ever
+# consulted for https. So an account that pushes over ssh to one hostname and
+# calls the API over https on another needs no special case, and there is no
+# `gitAuth` field to set.
+#
+# Drop `gitCredential` entirely for an account that never uses https. A
+# key-authenticated account is not made to invent a token it does not use.
 
 [[accounts]]
-name = "DanielAtKitchenCloud"
-provider = "github"
-email = "daniel@kitchencloud.ai"
-gitCredential = "GH_TOKEN"
-# All five KitchenCloud repos are github.com/KitchenCloudDev/*, so the
-# nesting hazard disappears: the org distinguishes them, not the path.
-match = ["github.com/KitchenCloudDev/**"]
-# Still needed: two repos here have no remote at all.
-paths = ["/Users/daniel/Developer/Profound/KitchenCloud/"]
-env = ["GH_TOKEN"]
-
-[[accounts]]
-name = "Digilope"
-provider = "gitea"          # Forgejo is a Gitea fork; `tea` speaks to it
-email = "dacarming@gmail.com"
-# Forgejo, since the Gitea migration. Same naming convention as before:
-# forgejo.digilope.com is the TLS-terminated HTTPS server (and the API),
-# app-forgejo.digilope.com is the raw machine port, which is what ssh needs.
-# The `app-` PREFIX marks the raw host, exactly as app-gitea did.
-#
-# Two hostnames, one account: git picks the transport per remote and the
-# credential helper is only ever consulted for https, so the token below
-# serves forgejo.digilope.com and the key serves app-forgejo. No per-service
-# config is needed -- that is why there is no gitAuth field.
-#
-# NOTE: *.digilope.com has WILDCARD DNS, so any name resolves and something
-# answers. A hostname appearing to work proves nothing; check the clone URL
-# Forgejo itself displays.
+name = "SelfHosted"
+provider = "gitea"          # Forgejo is a Gitea fork; `tea` speaks to both
+email = "you@example.net"
 gitCredential = "GITEA_TOKEN"
-sshKey = "~/.ssh/id_ed25519_Digilope_Gitea_Daniel"
+sshKey = "~/.ssh/id_ed25519_selfhosted"
 match = [
-    "forgejo.digilope.com/**",
-    "app-forgejo.digilope.com/**",
-    # Legacy Gitea names. The servers were renamed, not replaced, and local
-    # clones still carry these remotes -- keeping them means those repos still
-    # resolve to the right identity. Remove once the remotes are updated.
-    "app-gitea.digilope.com/**",
-    "gitea.digilope.com/**",
+    "git.example.net/**",
+    "ssh.git.example.net/**",
 ]
-paths = ["/Users/daniel/Developer/Digilope/"]
-env = ["GITEA_TOKEN", "GITEA_HOST=https://forgejo.digilope.com"]
+# `tea` needs its host as well as its token. The host is not a secret, so it is
+# written literally here rather than stored.
+env = ["GITEA_TOKEN", "GITEA_HOST=https://git.example.net"]
+paths = ["~/src/selfhosted/"]

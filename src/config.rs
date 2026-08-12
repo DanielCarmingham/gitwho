@@ -1,6 +1,6 @@
 //! Parsing of `accounts.toml` -- the single place an account is declared.
 //!
-//! This file is tracked in the `cfg` repo, so it names variables and never
+//! Meant to be committed to a dotfiles repo, so it names variables and never
 //! holds their values (R10).
 
 use serde::Deserialize;
@@ -62,8 +62,9 @@ pub struct Account {
     /// a key-authenticated account is not made to invent a token. Transport is
     /// deliberately NOT declared per account -- git chooses it per remote, and
     /// a credential helper is only ever consulted for https, so an account
-    /// using both (as Digilope does, over two hostnames) needs no special
-    /// case.
+    /// that uses both -- ssh to one hostname and the API over https on another,
+    /// which is the ordinary shape of a self-hosted Gitea or Forgejo -- needs
+    /// no special case.
     #[serde(rename = "gitCredential", default)]
     pub git_credential: Option<String>,
     /// The ssh key for remotes that use it, written into `core.sshcommand`.

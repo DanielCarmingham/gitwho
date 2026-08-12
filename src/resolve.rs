@@ -149,7 +149,7 @@ fn default_account(config: &Config) -> Result<Resolved<'_>, ResolveError> {
 
 /// Longest-prefix match of `dir` against the accounts' `paths`.
 ///
-/// Longest wins so a nested root (KitchenCloud inside Profound) beats the root
+/// Longest wins so a nested root (AcmeKitchen inside Acme) beats the root
 /// containing it, without depending on declaration order.
 fn resolve_path<'a>(config: &'a Config, dir: &Path) -> Option<Resolved<'a>> {
     // Temp dirs and symlinked roots differ between the configured spelling and
@@ -180,8 +180,8 @@ fn resolve_path<'a>(config: &'a Config, dir: &Path) -> Option<Resolved<'a>> {
 
 /// How specific a pattern is: the number of characters it pins down literally.
 ///
-/// `github.com/Profound-Kitchen/**` pins 28 characters and so beats
-/// `github.com/Profound-*/**`, which pins 21. Using specificity rather than
+/// `github.com/acme-kitchen/**` pins 24 characters and so beats
+/// `github.com/acme-*/**`, which pins 17. Using specificity rather than
 /// declaration order is what keeps nested orgs from being order-sensitive --
 /// the ordering trap the `includeIf` rules have today.
 fn specificity(pattern: &str) -> usize {

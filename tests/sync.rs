@@ -4,7 +4,7 @@ use gitwho::sync;
 const ACCOUNTS: &str = r#"
     [defaults]
     account = "Personal"
-    gitName = "Daniel Carmingham"
+    gitName = "Your Name"
 
     [[accounts]]
     name = "Personal"
@@ -13,7 +13,7 @@ const ACCOUNTS: &str = r#"
     gitCredential = "GH_TOKEN"
     sshKey = "~/.ssh/id_ed25519_personal"
     match = ["github.com/Personal/**"]
-    paths = ["/Users/daniel/Developer/DanielCarmingham/"]
+    paths = ["/home/someone/src/personal/"]
 
     [[accounts]]
     name = "Work"
@@ -42,7 +42,7 @@ fn each_account_gets_an_identity_file() {
     let personal = file(&plan, "Personal.gitconfig");
 
     assert!(personal.contains("email = me@example.com"));
-    assert!(personal.contains("name = Daniel Carmingham"));
+    assert!(personal.contains("name = Your Name"));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn declared_paths_become_gitdir_rules_for_repos_with_no_remote() {
     let includes = file(&plan, "includes.gitconfig");
 
     assert!(
-        includes.contains("gitdir:/Users/daniel/Developer/DanielCarmingham/"),
+        includes.contains("gitdir:/home/someone/src/personal/"),
         "a declared path should produce a gitdir rule; got:\n{includes}"
     );
 }
@@ -139,7 +139,7 @@ fn every_generated_file_says_it_is_generated() {
 /// meant to; this proves git agrees.
 #[test]
 fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
-    // Digilope's remotes are `gitea@app-gitea.digilope.com:daniel/...`. A
+    // SelfHosted's remotes are `gitea@ssh.git.example.net:someone/...`. A
     // `git@` pattern misses them entirely, and the failure is silent: the repo
     // just falls back to the default identity.
     let dir = tempfile::tempdir().unwrap();
@@ -158,10 +158,10 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
         match = ["github.com/Personal/**"]
 
         [[accounts]]
-        name = "Digilope"
+        name = "SelfHosted"
         provider = "gitea"
-        email = "digilope@example.com"
-        match = ["app-gitea.digilope.com/**"]
+        email = "you@example.net"
+        match = ["ssh.git.example.net/**"]
     "#,
     )
     .unwrap();
@@ -196,7 +196,7 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
         "remote",
         "add",
         "origin",
-        "gitea@app-gitea.digilope.com:daniel/one-drop-visuals.git",
+        "gitea@ssh.git.example.net:someone/site.git",
     ]);
 
     let email = String::from_utf8_lossy(&git(&["config", "--get", "user.email"]).stdout)
@@ -204,7 +204,7 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
         .to_string();
 
     assert_eq!(
-        email, "digilope@example.com",
-        "git did not select the Digilope identity for an scp remote with a non-git user"
+        email, "you@example.net",
+        "git did not select the SelfHosted identity for an scp remote with a non-git user"
     );
 }

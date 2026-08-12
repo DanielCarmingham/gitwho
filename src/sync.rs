@@ -128,9 +128,9 @@ fn url_forms(pattern: &str) -> Vec<String> {
     vec![
         format!("https://{host}/{rest}"),
         // scp-style. The user is wildcarded because it is not always `git`:
-        // Digilope's remotes are `gitea@app-gitea.digilope.com:...`, and a
-        // literal `git@` pattern misses them silently -- the repo simply falls
-        // back to the default identity. Verified against git 2.50.1 that `*@`
+        // a Gitea host serves `gitea@host:org/repo.git`, and a literal `git@`
+        // pattern misses it silently -- the repo simply falls back to the
+        // default identity. Verified against git 2.50.1 that `*@`
         // matches while a bare `*host*` does not, since `*` will not cross a
         // path separator.
         format!("*@{host}:{rest}"),

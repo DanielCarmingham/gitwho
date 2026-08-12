@@ -2,18 +2,18 @@ use std::collections::HashMap;
 
 use gitwho::secrets::{Backend, EnvBackend};
 
-/// The env backend exists to read the scheme already on this machine:
-/// `~/.zshrc.local` exports `GH_TOKEN_DanielAtProfound` and friends. Keeping
-/// it readable is what makes migration a copy rather than a re-issue.
+/// The env backend exists to read the scheme people already have: a shell
+/// rc file exporting `GH_TOKEN_<Account>` and friends. Keeping it readable is
+/// what makes migration a copy rather than a re-issue of every token.
 #[test]
 fn the_env_backend_reads_the_var_suffixed_with_the_account_name() {
     let env = HashMap::from([(
-        "GH_TOKEN_DanielAtProfound".to_string(),
+        "GH_TOKEN_Work".to_string(),
         "token-value".to_string(),
     )]);
     let backend = EnvBackend::from_map(env);
 
-    let found = backend.get("DanielAtProfound", "GH_TOKEN").unwrap();
+    let found = backend.get("Work", "GH_TOKEN").unwrap();
 
     assert_eq!(found.as_deref(), Some("token-value"));
 }

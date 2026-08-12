@@ -88,7 +88,7 @@ fn an_unknown_host_gets_no_credential_at_all() {
     );
 }
 
-/// Digilope authenticates git with an ssh key, so no token exists to hand
+/// SelfHosted authenticates git with an ssh key, so no token exists to hand
 /// over -- and requiring one would be inventing a credential that does not
 /// exist (R7).
 const SSH_ACCOUNT: &str = r#"
@@ -103,17 +103,17 @@ const SSH_ACCOUNT: &str = r#"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
 "#;
 
 #[test]
 fn an_ssh_account_is_never_handed_a_token() {
     let config = Config::parse(SSH_ACCOUNT).unwrap();
     let request =
-        Request::parse("protocol=https\nhost=app-gitea.digilope.com\npath=daniel/site.git\n");
+        Request::parse("protocol=https\nhost=ssh.git.example.net\npath=someone/site.git\n");
 
     let error = respond(&config, &backend(), &request, None)
         .expect_err("an ssh account has no token to give");
@@ -124,7 +124,7 @@ fn an_ssh_account_is_never_handed_a_token() {
         "an ssh account was handed another account's token: {message}"
     );
     assert!(
-        message.contains("Digilope"),
+        message.contains("SelfHosted"),
         "the error should name the account; got: {message}"
     );
 }

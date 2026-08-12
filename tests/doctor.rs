@@ -21,17 +21,17 @@ const ACCOUNTS: &str = r#"
     env = ["GH_TOKEN"]
 
     [[accounts]]
-    name = "Digilope"
+    name = "SelfHosted"
     provider = "gitea"
-    email = "me@digilope.example"
-    match = ["app-gitea.digilope.com/**"]
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
     env = ["GITEA_TOKEN"]
 "#;
 
 fn stocked_backend() -> EnvBackend {
     EnvBackend::from_map(HashMap::from([
         ("GH_TOKEN_Personal".to_string(), "personal-token".to_string()),
-        ("GITEA_TOKEN_Digilope".to_string(), "gitea-token".to_string()),
+        ("GITEA_TOKEN_SelfHosted".to_string(), "gitea-token".to_string()),
     ]))
 }
 
@@ -155,7 +155,7 @@ fn a_declared_secret_with_no_stored_value_is_a_problem() {
 
     let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
     assert!(
-        messages.iter().any(|m| m.contains("Digilope") && m.contains("GITEA_TOKEN")),
+        messages.iter().any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
         "the missing secret should be named; got {messages:?}"
     );
 }
