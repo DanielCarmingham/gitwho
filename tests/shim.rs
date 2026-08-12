@@ -12,7 +12,12 @@ fn a_posix_shim_is_still_a_sh_script() {
     // A characterisation guard, not a driver: this pins today's output through
     // the ShimTarget refactor so the platform that is actually in use cannot
     // change shape unnoticed.
-    let script = shim_script("gh", "/usr/local/bin/gitwho", "/opt/bin/gh", ShimTarget::Posix);
+    let script = shim_script(
+        "gh",
+        "/usr/local/bin/gitwho",
+        "/opt/bin/gh",
+        ShimTarget::Posix,
+    );
 
     assert_eq!(shim_file_name("gh", ShimTarget::Posix), "gh");
     assert!(script.starts_with("#!/bin/sh\n"), "got:\n{script}");
@@ -41,7 +46,9 @@ fn a_windows_shim_is_a_cmd_file_that_forwards_its_arguments() {
         "every line should be CRLF-terminated; got:\n{script:?}"
     );
     assert!(
-        script.contains(r#""C:\Users\d\bin\gitwho.exe" exec -- "C:\Program Files\GitHub CLI\gh.exe" %*"#),
+        script.contains(
+            r#""C:\Users\d\bin\gitwho.exe" exec -- "C:\Program Files\GitHub CLI\gh.exe" %*"#
+        ),
         "the wrapped call should quote both paths and forward every argument; got:\n{script}"
     );
 }
@@ -64,7 +71,12 @@ fn a_windows_shim_passes_the_exit_code_back_out() {
 /// one.)
 #[test]
 fn a_percent_in_a_path_is_escaped_for_cmd() {
-    let script = shim_script("gh", r"C:\bin\gitwho.exe", r"C:\100%\gh.exe", ShimTarget::Windows);
+    let script = shim_script(
+        "gh",
+        r"C:\bin\gitwho.exe",
+        r"C:\100%\gh.exe",
+        ShimTarget::Windows,
+    );
 
     assert!(
         script.contains(r"C:\100%%\gh.exe"),

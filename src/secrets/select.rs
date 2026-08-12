@@ -126,10 +126,7 @@ pub enum SelectError {
     #[error("unknown secret backend {name:?}; known backends are {}", KNOWN.join(", "))]
     Unknown { name: String },
     #[error("the {kind} store is not available here: {reason}")]
-    Unavailable {
-        kind: &'static str,
-        reason: String,
-    },
+    Unavailable { kind: &'static str, reason: String },
 }
 
 /// Why this store cannot be opened on this machine, if it cannot.

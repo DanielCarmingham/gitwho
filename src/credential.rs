@@ -92,12 +92,13 @@ pub fn respond(
 ) -> Result<Credential, CredentialError> {
     let account = choose_account(config, request, cwd)?;
 
-    let var = account
-        .git_credential
-        .as_deref()
-        .ok_or_else(|| CredentialError::NoCredentialVariable {
-            account: account.name.clone(),
-        })?;
+    let var =
+        account
+            .git_credential
+            .as_deref()
+            .ok_or_else(|| CredentialError::NoCredentialVariable {
+                account: account.name.clone(),
+            })?;
 
     let password = backend.get(&account.name, var)?.ok_or_else(|| {
         // Loudly, and without falling back to any other account's token: a
@@ -124,9 +125,9 @@ fn choose_account<'a>(
         return Ok(resolve::resolve_url(config, &target)?.account);
     }
 
-    let cwd = cwd.ok_or(CredentialError::Unresolved(
-        resolve::ResolveError::NoMatch("request carried no host".to_string()),
-    ))?;
+    let cwd = cwd.ok_or(CredentialError::Unresolved(resolve::ResolveError::NoMatch(
+        "request carried no host".to_string(),
+    )))?;
 
     let resolved = resolve::resolve_repo(config, cwd)?;
 

@@ -15,7 +15,11 @@ use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
 use gitwho::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
 
 #[derive(Parser)]
-#[command(name = "gitwho", version, about = "Per-repository git identity and credentials")]
+#[command(
+    name = "gitwho",
+    version,
+    about = "Per-repository git identity and credentials"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -238,8 +242,7 @@ fn doctor_report() -> Result<ExitCode, String> {
         secrets: secrets_path()?,
         owner: gitwho::doctor::current_uid(),
         backend: choice,
-        owner_only_enforced: AgeFileBackend::protection()
-            == gitwho::secrets::Protection::OwnerOnly,
+        owner_only_enforced: AgeFileBackend::protection() == gitwho::secrets::Protection::OwnerOnly,
     };
 
     let findings = gitwho::doctor::run(&config, backend, &ambient, &wiring, &store);
@@ -294,13 +297,19 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
             step("would create", format!("{}", identity.display()));
         }
     } else {
-        step("ok", format!("store: {} (no key file needed)", choice.kind.name()));
+        step(
+            "ok",
+            format!("store: {} (no key file needed)", choice.kind.name()),
+        );
     }
 
     // --- 2. the config, which is where this stops ---------------------------
     if !config_path.exists() {
         if !write {
-            step("would create", format!("{} from the template", config_path.display()));
+            step(
+                "would create",
+                format!("{} from the template", config_path.display()),
+            );
             println!();
             println!("nothing was written; re-run with --write to apply");
             return Ok(ExitCode::SUCCESS);
@@ -396,11 +405,7 @@ fn step(state: &str, detail: String) {
 }
 
 /// Handle one of the two files gitwho does not own.
-fn report_snippet(
-    path: &Path,
-    snippet: &gitwho::init::Snippet,
-    write: bool,
-) -> Result<(), String> {
+fn report_snippet(path: &Path, snippet: &gitwho::init::Snippet, write: bool) -> Result<(), String> {
     use gitwho::init::Applied;
 
     let applied = gitwho::init::ensure(path, snippet, write)
@@ -408,13 +413,19 @@ fn report_snippet(
 
     match applied {
         Applied::AlreadyPresent => step("ok", format!("{} ({})", path.display(), snippet.purpose)),
-        Applied::Appended => step("appended", format!("{} ({})", path.display(), snippet.purpose)),
+        Applied::Appended => step(
+            "appended",
+            format!("{} ({})", path.display(), snippet.purpose),
+        ),
         Applied::WouldAppend => step(
             "would append",
             format!("{} ({})", path.display(), snippet.purpose),
         ),
         Applied::FileMissing => {
-            step("missing", format!("{} -- add this yourself:", path.display()));
+            step(
+                "missing",
+                format!("{} -- add this yourself:", path.display()),
+            );
             for line in snippet.text.lines().filter(|l| !l.trim().is_empty()) {
                 println!("               {line}");
             }
@@ -510,7 +521,10 @@ fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
         println!("nothing was written; re-run with --write to apply");
         println!("then add this to your gitconfig, once:");
         println!("    [include]");
-        println!("        path = {}", dir.join("includes.gitconfig").display());
+        println!(
+            "        path = {}",
+            dir.join("includes.gitconfig").display()
+        );
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -539,8 +553,8 @@ fn mcp(action: McpAction) -> Result<ExitCode, String> {
         let original = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
-        let (rewritten, changed) =
-            gitwho::mcp::wrap(&original, &gitwho).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (rewritten, changed) = gitwho::mcp::wrap(&original, &gitwho)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
 
         if changed.is_empty() {
             println!("{}: nothing to change", path.display());
@@ -607,9 +621,7 @@ fn secret(action: SecretAction) -> Result<(), String> {
         }
 
         SecretAction::Delete { account, var } => {
-            backend
-                .delete(&account, &var)
-                .map_err(|e| e.to_string())?;
+            backend.delete(&account, &var).map_err(|e| e.to_string())?;
             println!("deleted {account}/{var}");
             Ok(())
         }
@@ -729,8 +741,8 @@ fn shim(action: ShimAction) -> Result<(), String> {
         ShimAction::Install { dir, names } => {
             let path_var = std::env::var("PATH").unwrap_or_default();
             for name in &names {
-                let written = gitwho::shim::install(name, &dir, &path_var)
-                    .map_err(|e| e.to_string())?;
+                let written =
+                    gitwho::shim::install(name, &dir, &path_var).map_err(|e| e.to_string())?;
                 println!("{}", written.path.display());
             }
             Ok(())
@@ -861,11 +873,8 @@ fn store_dir() -> Result<&'static PathBuf, String> {
     static DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
     DIR.get_or_init(|| {
-        gitwho::paths::config_dir(
-            &gitwho::paths::from_process,
-            gitwho::paths::Layout::HOST,
-        )
-        .map_err(|e| e.to_string())
+        gitwho::paths::config_dir(&gitwho::paths::from_process, gitwho::paths::Layout::HOST)
+            .map_err(|e| e.to_string())
     })
     .as_ref()
     .map_err(String::clone)
@@ -905,8 +914,7 @@ fn open_backend(configured: Option<&str>) -> Result<(Box<dyn Backend>, Choice), 
 
 fn choose_backend(configured: Option<&str>) -> Result<Choice, String> {
     let from_env = std::env::var(select::ENV_VAR).ok();
-    select::choose(from_env.as_deref(), configured, &Platform::detect())
-        .map_err(|e| e.to_string())
+    select::choose(from_env.as_deref(), configured, &Platform::detect()).map_err(|e| e.to_string())
 }
 
 fn config_path() -> Result<PathBuf, String> {

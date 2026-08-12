@@ -162,7 +162,10 @@ fn includes_file(config: &Config, dir: &Path) -> String {
     // and there is nothing to order them against.
     out.push_str("# Which helper answers for which host.\n");
     out.push_str("[include]\n");
-    out.push_str(&format!("\tpath = {}\n\n", dir.join(CREDENTIALS_FILE).display()));
+    out.push_str(&format!(
+        "\tpath = {}\n\n",
+        dir.join(CREDENTIALS_FILE).display()
+    ));
 
     // Path rules first. Git applies includes in order and the last match wins,
     // so putting URL rules afterwards lets the remote -- the better evidence --

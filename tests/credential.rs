@@ -25,7 +25,10 @@ const ACCOUNTS: &str = r#"
 
 fn backend() -> EnvBackend {
     EnvBackend::from_map(HashMap::from([
-        ("GH_TOKEN_Personal".to_string(), "personal-token".to_string()),
+        (
+            "GH_TOKEN_Personal".to_string(),
+            "personal-token".to_string(),
+        ),
         ("GH_TOKEN_Work".to_string(), "work-token".to_string()),
     ]))
 }
@@ -171,7 +174,12 @@ fn an_unmatched_remote_does_not_release_a_token_either() {
         .status()
         .unwrap();
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/microsoft/vscode.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/microsoft/vscode.git",
+        ])
         .current_dir(dir.path())
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")

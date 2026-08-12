@@ -7,10 +7,7 @@ use gitwho::secrets::{Backend, EnvBackend};
 /// what makes migration a copy rather than a re-issue of every token.
 #[test]
 fn the_env_backend_reads_the_var_suffixed_with_the_account_name() {
-    let env = HashMap::from([(
-        "GH_TOKEN_Work".to_string(),
-        "token-value".to_string(),
-    )]);
+    let env = HashMap::from([("GH_TOKEN_Work".to_string(), "token-value".to_string())]);
     let backend = EnvBackend::from_map(env);
 
     let found = backend.get("Work", "GH_TOKEN").unwrap();

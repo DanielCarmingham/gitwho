@@ -108,7 +108,8 @@ fn the_layout_and_not_the_host_decides_which_variable_is_consulted() {
     let windows = dir_for(&env, Layout::Windows).unwrap();
 
     assert_ne!(
-        unix, windows,
+        unix,
+        windows,
         "both layouts resolved to {}; the parameter is doing nothing",
         unix.display()
     );
@@ -149,8 +150,8 @@ fn the_windows_error_names_appdata_because_that_is_what_was_consulted() {
 /// yields a relative path just as an absent one did.
 #[test]
 fn an_empty_home_is_treated_as_unset_rather_than_as_the_root() {
-    let error = dir_for(&[("HOME", "")], Layout::Unix)
-        .expect_err("an empty HOME names no directory");
+    let error =
+        dir_for(&[("HOME", "")], Layout::Unix).expect_err("an empty HOME names no directory");
 
     assert!(matches!(error, PathError::NoHome { .. }));
 }

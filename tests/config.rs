@@ -53,7 +53,10 @@ fn parses_an_account_with_its_match_patterns() {
     assert_eq!(config.accounts.len(), 1);
     assert_eq!(config.accounts[0].name, "Personal");
     assert_eq!(config.accounts[0].email, "me@example.com");
-    assert_eq!(config.accounts[0].match_patterns, ["github.com/Personal/**"]);
+    assert_eq!(
+        config.accounts[0].match_patterns,
+        ["github.com/Personal/**"]
+    );
 }
 
 #[test]

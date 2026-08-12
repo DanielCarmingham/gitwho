@@ -22,7 +22,8 @@ fn the_gitconfig_snippet_is_an_include_naming_the_generated_file() {
 fn an_include_added_by_hand_counts_as_already_present() {
     let snippet = Snippet::gitconfig_include(includes());
 
-    let hand_written = "[include]\n    path = /home/someone/.config/gitwho/git/includes.gitconfig\n";
+    let hand_written =
+        "[include]\n    path = /home/someone/.config/gitwho/git/includes.gitconfig\n";
 
     assert!(
         snippet.is_present_in(hand_written),
@@ -55,7 +56,9 @@ fn the_path_snippet_prepends_the_shim_directory() {
     let snippet = Snippet::path_export(Path::new("/home/someone/.local/share/gitwho/shims"));
 
     assert!(
-        snippet.text.contains("/home/someone/.local/share/gitwho/shims:$PATH"),
+        snippet
+            .text
+            .contains("/home/someone/.local/share/gitwho/shims:$PATH"),
         "the shim dir must come first, or the real gh wins; got: {}",
         snippet.text
     );
@@ -94,7 +97,10 @@ fn ensure_appends_once_and_then_says_so() {
 
     let snippet = Snippet::path_export(Path::new("/opt/shims"));
 
-    assert_eq!(init::ensure(&rc, &snippet, true).unwrap(), Applied::Appended);
+    assert_eq!(
+        init::ensure(&rc, &snippet, true).unwrap(),
+        Applied::Appended
+    );
     let after_first = std::fs::read_to_string(&rc).unwrap();
     assert!(after_first.starts_with("# existing content\n"));
     assert!(after_first.contains("/opt/shims"));
@@ -261,12 +267,13 @@ fn the_scaffolded_store_and_config_are_owner_only() {
     let home = fresh_home();
     gitwho(home.path(), &["init", "--write"]);
 
-    let mode = |p: std::path::PathBuf| {
-        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
-    };
+    let mode = |p: std::path::PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
 
     assert_eq!(mode(home.path().join(".config/gitwho")), 0o700);
-    assert_eq!(mode(home.path().join(".config/gitwho/accounts.toml")), 0o600);
+    assert_eq!(
+        mode(home.path().join(".config/gitwho/accounts.toml")),
+        0o600
+    );
     assert_eq!(mode(home.path().join(".config/gitwho/identity.key")), 0o600);
 }
 
@@ -322,7 +329,10 @@ env = ["GH_TOKEN"]
     let gitconfig = std::fs::read_to_string(home.path().join(".gitconfig")).unwrap();
     let zshrc = std::fs::read_to_string(home.path().join(".zshrc")).unwrap();
     assert_eq!(gitconfig.matches("includes.gitconfig").count(), 1);
-    assert!(gitconfig.contains("[user]"), "existing content must survive");
+    assert!(
+        gitconfig.contains("[user]"),
+        "existing content must survive"
+    );
     assert!(zshrc.contains("# existing content"));
 
     let second = gitwho(home.path(), &["init", "--write"]);

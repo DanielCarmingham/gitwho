@@ -27,8 +27,14 @@ const ACCOUNTS: &str = r#"
 
 fn backend() -> EnvBackend {
     EnvBackend::from_map(HashMap::from([
-        ("GH_TOKEN_Personal".to_string(), "personal-token".to_string()),
-        ("GITEA_TOKEN_SelfHosted".to_string(), "gitea-token".to_string()),
+        (
+            "GH_TOKEN_Personal".to_string(),
+            "personal-token".to_string(),
+        ),
+        (
+            "GITEA_TOKEN_SelfHosted".to_string(),
+            "gitea-token".to_string(),
+        ),
     ]))
 }
 
@@ -39,7 +45,10 @@ fn injects_the_declared_variables_for_the_account() {
 
     let plan = plan_env(&config, &backend(), account).unwrap();
 
-    assert_eq!(plan.set.get("GH_TOKEN").map(String::as_str), Some("personal-token"));
+    assert_eq!(
+        plan.set.get("GH_TOKEN").map(String::as_str),
+        Some("personal-token")
+    );
 }
 
 #[test]

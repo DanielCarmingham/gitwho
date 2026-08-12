@@ -329,7 +329,10 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
                 findings.push(Finding::new(
                     Level::Problem,
                     "config",
-                    format!("account {} has an invalid pattern {pattern}: {e}", account.name),
+                    format!(
+                        "account {} has an invalid pattern {pattern}: {e}",
+                        account.name
+                    ),
                 ));
             }
         }

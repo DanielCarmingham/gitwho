@@ -3,8 +3,8 @@ use std::path::Path;
 
 use gitwho::config::Config;
 use gitwho::doctor::{self, GitWiring, Level, Store};
-use gitwho::secrets::{BackendKind, Choice, Source};
 use gitwho::secrets::{Backend, EnvBackend};
+use gitwho::secrets::{BackendKind, Choice, Source};
 use tempfile::TempDir;
 
 const ACCOUNTS: &str = r#"
@@ -30,8 +30,14 @@ const ACCOUNTS: &str = r#"
 
 fn stocked_backend() -> EnvBackend {
     EnvBackend::from_map(HashMap::from([
-        ("GH_TOKEN_Personal".to_string(), "personal-token".to_string()),
-        ("GITEA_TOKEN_SelfHosted".to_string(), "gitea-token".to_string()),
+        (
+            "GH_TOKEN_Personal".to_string(),
+            "personal-token".to_string(),
+        ),
+        (
+            "GITEA_TOKEN_SelfHosted".to_string(),
+            "gitea-token".to_string(),
+        ),
     ]))
 }
 
@@ -153,9 +159,14 @@ fn a_declared_secret_with_no_stored_value_is_a_problem() {
 
     let findings = run_with(&config, &half_stocked, &BTreeMap::new(), &healthy_wiring());
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
-        messages.iter().any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
+        messages
+            .iter()
+            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
         "the missing secret should be named; got {messages:?}"
     );
 }
@@ -191,7 +202,10 @@ fn github_without_use_http_path_is_a_problem() {
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("useHttpPath")),
         "useHttpPath being off should be a problem; got {messages:?}"
@@ -209,7 +223,10 @@ fn a_credential_helper_that_is_not_gitwho_is_a_problem() {
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("credential.helper")),
         "a foreign credential helper should be a problem; got {messages:?}"
@@ -233,9 +250,17 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
     )
     .unwrap();
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+    );
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("Ghost")),
         "an undeclared default should be named; got {messages:?}"
@@ -266,13 +291,19 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
     )
     .unwrap();
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+    );
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("github.com/Shared/**")),
+        messages.iter().any(|m| m.contains("github.com/Shared/**")),
         "the duplicated pattern should be named; got {messages:?}"
     );
 }
@@ -316,7 +347,10 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         .iter()
         .filter(|f| f.check == "ambient" && f.message.contains("GH_TOKEN"))
         .count();
-    assert_eq!(mentions, 1, "expected one line for GH_TOKEN, got {mentions}");
+    assert_eq!(
+        mentions, 1,
+        "expected one line for GH_TOKEN, got {mentions}"
+    );
 }
 
 #[test]
@@ -333,7 +367,10 @@ fn a_url_scoped_helper_bypassing_gitwho_is_a_problem() {
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("github.com is served by")),
         "a URL-scoped override should be caught even with a correct global helper; got {messages:?}"
@@ -359,9 +396,17 @@ fn an_account_with_no_author_name_anywhere_is_a_problem() {
     )
     .unwrap();
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &healthy_wiring());
+    let findings = run_with(
+        &config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+    );
 
-    let messages: Vec<_> = problems(&findings).iter().map(|f| f.message.clone()).collect();
+    let messages: Vec<_> = problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("author name")),
         "a missing author name should be a problem; got {messages:?}"
@@ -571,13 +616,17 @@ fn a_store_owned_by_someone_else_is_a_problem() {
         .collect();
     for name in ["accounts.toml", "identity.key", "secrets.age"] {
         assert!(
-            messages.iter().any(|m| m.contains(name) && m.contains("owned by")),
+            messages
+                .iter()
+                .any(|m| m.contains(name) && m.contains("owned by")),
             "{name} should be reported as foreign-owned; got {messages:?}"
         );
     }
     let named = dir.path().display().to_string();
     assert!(
-        messages.iter().any(|m| m.contains(&named) && m.contains("owned by")),
+        messages
+            .iter()
+            .any(|m| m.contains(&named) && m.contains("owned by")),
         "the directory should be reported as foreign-owned; got {messages:?}"
     );
 }
@@ -634,8 +683,7 @@ fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
         .find(|f| f.check == "backend")
         .expect("doctor should say which store is in effect");
     assert!(
-        reported.message.contains("keychain")
-            && reported.message.contains("GITWHO_SECRET_BACKEND"),
+        reported.message.contains("keychain") && reported.message.contains("GITWHO_SECRET_BACKEND"),
         "the store and what chose it should both be named; got: {}",
         reported.message
     );

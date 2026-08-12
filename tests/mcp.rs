@@ -29,12 +29,7 @@ fn wraps_a_provider_server_so_it_launches_through_exec() {
     assert_eq!(gitea["command"], "/usr/local/bin/gitwho");
     assert_eq!(
         gitea["args"],
-        serde_json::json!([
-            "exec",
-            "--",
-            "/opt/mcp/gitea-mcp",
-            "-d"
-        ])
+        serde_json::json!(["exec", "--", "/opt/mcp/gitea-mcp", "-d"])
     );
 }
 
@@ -59,7 +54,10 @@ fn wrapping_twice_does_not_double_wrap() {
     let (once, _) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitwho").unwrap();
     let (twice, changed) = mcp::wrap(&once, "/usr/local/bin/gitwho").unwrap();
 
-    assert!(changed.is_empty(), "second pass reported changes: {changed:?}");
+    assert!(
+        changed.is_empty(),
+        "second pass reported changes: {changed:?}"
+    );
     assert_eq!(once, twice, "second pass altered the file");
 }
 
@@ -103,7 +101,10 @@ fn a_server_with_no_provider_marker_is_not_touched() {
 
     let (_, changed) = mcp::wrap(input, "/usr/local/bin/gitwho").unwrap();
 
-    assert!(changed.is_empty(), "a non-provider server was wrapped: {changed:?}");
+    assert!(
+        changed.is_empty(),
+        "a non-provider server was wrapped: {changed:?}"
+    );
 }
 
 #[test]

@@ -29,7 +29,9 @@ fn fixture(dir: &Path) {
     let key_path = dir.join("identity.key");
     AgeFileBackend::generate_identity_file(&key_path).unwrap();
     let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
-    backend.set("Personal", "GH_TOKEN", "personal-token").unwrap();
+    backend
+        .set("Personal", "GH_TOKEN", "personal-token")
+        .unwrap();
     backend.set("Work", "GH_TOKEN", "work-token").unwrap();
 }
 
@@ -264,8 +266,12 @@ fn exec_fixture(dir: &Path) {
     let key_path = dir.join("identity.key");
     AgeFileBackend::generate_identity_file(&key_path).unwrap();
     let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
-    backend.set("Personal", "GH_TOKEN", "personal-token").unwrap();
-    backend.set("SelfHosted", "GITEA_TOKEN", "gitea-token").unwrap();
+    backend
+        .set("Personal", "GH_TOKEN", "personal-token")
+        .unwrap();
+    backend
+        .set("SelfHosted", "GITEA_TOKEN", "gitea-token")
+        .unwrap();
 }
 
 fn repo_for(dir: &Path, name: &str, origin: &str) -> std::path::PathBuf {
@@ -403,7 +409,10 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "exec should not fail in an unclaimed clone");
+    assert!(
+        output.status.success(),
+        "exec should not fail in an unclaimed clone"
+    );
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("GH_TOKEN=personal-token"),
         "the default account's token should be used"

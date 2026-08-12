@@ -35,8 +35,8 @@ fn gitwho(dir: &Path, args: &[&str]) -> Command {
         .env("GITWHO_SECRETS", dir.join("secrets.age"))
         .env("GITWHO_IDENTITY", dir.join("identity.key"))
         // Cleared, not merely unset here: it is the highest-precedence backend
-        // selector, so a developer who exported it -- as CUTOVER.md tells them
-        // to -- would otherwise point this suite at their real login keychain.
+        // selector, so a developer who has it exported would otherwise point
+        // this whole suite at their real login keychain.
         .env_remove("GITWHO_SECRET_BACKEND");
     cmd
 }
@@ -200,7 +200,11 @@ fn the_environment_overrides_the_configured_backend() {
         cmd
     };
 
-    assert!(with_override(&["secret", "init"]).output().unwrap().status.success());
+    assert!(with_override(&["secret", "init"])
+        .output()
+        .unwrap()
+        .status
+        .success());
 
     let mut child = with_override(&["secret", "set", "Personal", "GH_TOKEN"])
         .stdin(Stdio::piped())
@@ -252,7 +256,10 @@ fn an_unknown_configured_backend_is_refused() {
 
     let list = run(dir.path(), &["secret", "list"]);
 
-    assert!(!list.status.success(), "an unknown backend should be refused");
+    assert!(
+        !list.status.success(),
+        "an unknown backend should be refused"
+    );
     let err = String::from_utf8_lossy(&list.stderr);
     assert!(
         err.contains("kechain") && err.contains("age"),
@@ -306,7 +313,10 @@ fn setting_a_secret_for_an_unknown_account_is_refused() {
         "tok\n",
     );
 
-    assert!(!out.status.success(), "an unknown account should be refused");
+    assert!(
+        !out.status.success(),
+        "an unknown account should be refused"
+    );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("Personel") && err.contains("Personal"),
@@ -392,7 +402,8 @@ fn setting_an_undeclared_variable_warns_but_still_stores() {
     assert!(out.status.success(), "it should still store");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.to_lowercase().contains("not declared") || err.to_lowercase().contains("does not declare"),
+        err.to_lowercase().contains("not declared")
+            || err.to_lowercase().contains("does not declare"),
         "expected a warning about the undeclared variable; got: {err}"
     );
 }

@@ -63,7 +63,10 @@ fn resolves_a_linked_worktree_placed_in_a_foreign_root() {
     // the path rather than asking git gets this wrong (R2).
     let main = tempfile::tempdir().unwrap();
     repo_with_origin(main.path(), "https://github.com/WorkOrg/somerepo.git");
-    git(main.path(), &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(
+        main.path(),
+        &["commit", "-q", "--allow-empty", "-m", "init"],
+    );
 
     let foreign_root = tempfile::tempdir().unwrap();
     let worktree = foreign_root.path().join("feature-branch");

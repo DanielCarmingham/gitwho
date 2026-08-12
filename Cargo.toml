@@ -2,6 +2,36 @@
 name = "gitwho"
 version = "0.1.0"
 edition = "2021"
+description = "Pick the right git identity and credentials for a repository, automatically, wherever it lives on disk"
+license = "MIT"
+repository = "https://github.com/DanielCarmingham/gitwho"
+# A Homebrew formula without a homepage fails `brew audit`.
+homepage = "https://github.com/DanielCarmingham/gitwho"
+readme = "README.md"
+keywords = ["git", "credentials", "identity", "github", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+# Measured, not guessed: `cargo +1.88 build --locked` succeeds and keyring
+# 4.1.6 declares 1.88.0 itself. CI pins this exact version so it cannot drift.
+rust-version = "1.88"
+# Only the prose is excluded. `docs/accounts.toml.example` must stay in the
+# tarball -- `init::TEMPLATE` is an `include_str!` of it, so excluding it breaks
+# the build rather than just the docs.
+exclude = [
+    "docs/*.md",
+    "CLAUDE.md",
+    ".github/",
+    ".claude/",
+    ".dex/",
+    "dist-workspace.toml",
+]
+
+# Without this, `cargo binstall` falls back to a full source build: every one of
+# its default filename patterns embeds the version, and dist's archives do not.
+# The leading `{name}-{target}/` matters -- dist nests the binary in a directory.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
 
 [lib]
 name = "gitwho"
