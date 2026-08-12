@@ -4,7 +4,7 @@
 //! box are both exercised from this Mac -- and nothing in this file can pop a
 //! Keychain dialog, because `choose` has no way to reach a store.
 
-use gitfriend::secrets::select::{self, BackendKind, Platform, SelectError, Source};
+use gitwho::secrets::select::{self, BackendKind, Platform, SelectError, Source};
 
 fn macos() -> Platform {
     Platform {
@@ -116,7 +116,7 @@ fn the_environment_beats_the_configured_backend() {
     assert_eq!(choice.source, Source::Environment);
 }
 
-/// `GITFRIEND_SECRET_BACKEND=` is how a shell clears a variable. Treating the
+/// `GITWHO_SECRET_BACKEND=` is how a shell clears a variable. Treating the
 /// empty string as a backend name would refuse every command in that shell.
 #[test]
 fn a_cleared_environment_variable_falls_through_to_the_configured_backend() {

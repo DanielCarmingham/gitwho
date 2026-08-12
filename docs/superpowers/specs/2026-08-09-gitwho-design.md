@@ -1,4 +1,4 @@
-# gitfriend — design
+# gitwho — design
 
 Written 2026-08-09. Derives from [REQUIREMENTS.md](../../../REQUIREMENTS.md)
 (requirements R1–R15 and the evidence behind them). Everything under "Verified
@@ -28,7 +28,7 @@ project, and every MCP server or agent launched from it, sees every other
 project's credential. `Digilope/one-drop-visuals` runs `gitea-mcp` with an empty
 `env` block right now, inheriting whatever was ambient.
 
-**Outcome:** a `gitfriend` binary where the correct identity and credentials are
+**Outcome:** a `gitwho` binary where the correct identity and credentials are
 selected from the repository itself, wherever it lives, and where no token sits
 in the ambient environment at all.
 
@@ -37,14 +37,14 @@ in the ambient environment at all.
 | Decision | Choice |
 |---|---|
 | Form factor | Rust binary + generated shell glue |
-| Isolation | Least-privilege by default; `gitfriend shell-env` as explicit opt-in escape hatch |
+| Isolation | Least-privilege by default; `gitwho shell-env` as explicit opt-in escape hatch |
 | Secret store | Pluggable backend trait. **age-encrypted file is the working default**; Keychain is blocked pending code signing — see "Revision" below |
 | v1 providers | GitHub, Gitea/Forgejo (incl. Codeberg), GitLab, Azure DevOps |
 | Non-git creds (AWS, npm) | **Out of scope for v1** |
-| MCP wiring | Rewrite `command` to launch via `gitfriend exec`; resolve from cwd at launch |
+| MCP wiring | Rewrite `command` to launch via `gitwho exec`; resolve from cwd at launch |
 | Multiple remotes | `origin` wins; error only if `origin` itself is ambiguous |
 | No remote | Path-rule fallback → explicitly declared `default` account |
-| Dotfiles | Single `accounts.toml` is source of truth; `gitfriend sync` generates gitconfigs; the `direnvrc` account block is deleted |
+| Dotfiles | Single `accounts.toml` is source of truth; `gitwho sync` generates gitconfigs; the `direnvrc` account block is deleted |
 
 ## Verified findings this plan depends on
 
@@ -116,7 +116,7 @@ Four entry points into one resolver. Nothing shares mutable global state.
 
 ```
                     ┌──────────────────────────┐
-                    │  ~/.config/gitfriend/    │
+                    │  ~/.config/gitwho/    │
                     │      accounts.toml       │  ← the only file you edit
                     └───────────┬──────────────┘
                                 │
@@ -147,7 +147,7 @@ problem at the root rather than re-triggering it more often.
 
 ## Config schema
 
-`~/.config/gitfriend/accounts.toml` — tracked in the `cfg` repo, **names only,
+`~/.config/gitwho/accounts.toml` — tracked in the `cfg` repo, **names only,
 never values** (R10).
 
 The `email`, `match`, and `sshKey` values below are **illustrative**. The real
@@ -249,7 +249,7 @@ hermetic fixture harness (temp `HOME`, temp repos, no real tokens). Tests map
 one host), R4 (no remote → path → default), the KitchenCloud nesting case, and
 the fork/`origin`-wins case.
 
-**Phase 2 — credential helper.** `gitfriend credential get|store|erase`. This is
+**Phase 2 — credential helper.** `gitwho credential get|store|erase`. This is
 the single highest-value piece: per finding 3 it alone satisfies R1/R2/R3 for
 git transport, including at clone time. Requires setting
 `credential.useHttpPath = true` for `github.com` so the org reaches the helper —
@@ -257,11 +257,11 @@ note this **replaces GCM for github.com**, so `~/.gitconfig-common`'s existing
 `[credential]` stack needs untangling (it currently sets `helper` four times,
 including two empty resets).
 
-**Phase 3 — secrets backends.** Keychain + env, `gitfriend secret set|list`
+**Phase 3 — secrets backends.** Keychain + env, `gitwho secret set|list`
 (list shows fingerprints only). Import the 3 existing `GH_TOKEN_*` values and
 `GITEA_TOKEN` from `~/.zshrc.local` into the Keychain.
 
-**Phase 4 — `exec` + shims.** `gitfriend exec [--account X] -- cmd …`, scrubbing
+**Phase 4 — `exec` + shims.** `gitwho exec [--account X] -- cmd …`, scrubbing
 inherited provider vars before injecting the resolved ones (so a stale ambient
 `GH_TOKEN` can't leak past — R11). Generated shims for `gh` and `tea` on `PATH`.
 
@@ -271,12 +271,12 @@ inherited provider vars before injecting the resolved ones (so a stale ambient
 backing secret, and unwrapped provider MCPs. Retire the `direnvrc` account block
 and the account-root `.envrc` token exports.
 
-**Phase 6 — MCP wiring.** `gitfriend mcp sync` rewrites provider MCP `command`
-entries to launch via `gitfriend exec`. Fix `Digilope/one-drop-visuals` first —
+**Phase 6 — MCP wiring.** `gitwho mcp sync` rewrites provider MCP `command`
+entries to launch via `gitwho exec`. Fix `Digilope/one-drop-visuals` first —
 it's the live exposure case.
 
 **Phase 7 — migration + docs.** Cut the live machine over, rewrite `~/ACCOUNTS.md`
-as the gitfriend checklist (R13), resolve the two unexplained `GITHUB_PAT*`
+as the gitwho checklist (R13), resolve the two unexplained `GITHUB_PAT*`
 variables (open question 5) and the vestigial `[github] account` key (open
 question 6), and confirm the fresh-machine story (R14).
 
@@ -302,7 +302,7 @@ real credentials):
 Manual, on the live machine after phase 5:
 
 ```
-gitfriend doctor                    # expect: no drift, all secrets present
+gitwho doctor                    # expect: no drift, all secrets present
 env | grep -E 'GH_TOKEN|GITEA_TOKEN'   # expect: empty
 cd ~/Developer/Profound/<repo> && git config user.email && gh api user --jq .login
 cd ~/Developer/Digilope/<repo> && gh api user --jq .login   # must NOT be a Profound login
@@ -316,8 +316,8 @@ git clone https://github.com/EJ-Rice/<repo> /tmp/relocated && \
   configured for non-github hosts and stage phase 2 behind a per-host override
   so it can be reverted with one config line.
 - **Keychain prompts** on every helper invocation would violate R15. Verify the
-  ACL grants the `gitfriend` binary persistent access; re-test after every
+  ACL grants the `gitwho` binary persistent access; re-test after every
   rebuild, since a changed binary signature can re-trigger prompts.
 - **R14 regression** — Keychain secrets can't be committed. Fresh-machine setup
-  becomes "clone `cfg`, run `gitfriend secret set` ×N". Document it as an
+  becomes "clone `cfg`, run `gitwho secret set` ×N". Document it as an
   explicit manual step rather than letting it be discovered.

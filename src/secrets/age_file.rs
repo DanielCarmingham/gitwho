@@ -33,14 +33,14 @@ pub struct AgeFileBackend {
 /// The decrypted contents: `Account/VAR` to value.
 type Entries = BTreeMap<String, String>;
 
-/// How far this platform lets gitfriend close the file down.
+/// How far this platform lets gitwho close the file down.
 ///
 /// Named rather than left implicit because the weaker answer must be *reported*
 /// (`doctor`), not silently accepted: a no-op that looks like success is how a
 /// file ends up readable by everyone who can reach the directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protection {
-    /// `0600`, applied by gitfriend.
+    /// `0600`, applied by gitwho.
     OwnerOnly,
     /// Whatever the containing directory grants. On a default Windows profile
     /// that is owner plus SYSTEM plus Administrators -- weaker than `0600`, not
@@ -104,7 +104,7 @@ impl AgeFileBackend {
 
         let identity = x25519::Identity::generate();
         let contents = format!(
-            "# gitfriend identity. Anything able to read this file can decrypt\n\
+            "# gitwho identity. Anything able to read this file can decrypt\n\
              # the secrets file. Keep it out of version control and backups.\n\
              {}\n",
             identity.to_string().expose_secret()
@@ -175,9 +175,9 @@ impl AgeFileBackend {
 /// `create_dir_all` applies the umask, so the ubiquitous `022` left this `0755`
 /// -- and the directory is the whole reason anything below it is out of reach,
 /// which is why `doctor` fails on anything but `0700`. A fresh install used to
-/// fail that check on permissions gitfriend itself had set.
+/// fail that check on permissions gitwho itself had set.
 ///
-/// Only a directory this call actually creates is closed down. `GITFRIEND_*`
+/// Only a directory this call actually creates is closed down. `GITWHO_*`
 /// can point the store at a directory that already exists and belongs to
 /// something else -- chmodding *that* would be a side effect nobody asked for,
 /// and `doctor` is what reports one that has since drifted.

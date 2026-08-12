@@ -984,7 +984,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gitfriend"
+name = "gitwho"
 version = "0.1.0"
 dependencies = [
  "age",

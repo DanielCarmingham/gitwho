@@ -1,4 +1,4 @@
-use gitfriend::git::effective_helpers;
+use gitwho::git::effective_helpers;
 
 /// An empty `credential.helper` value clears everything configured before it.
 /// This machine's stack relies on that: Xcode's bundled gitconfig contributes

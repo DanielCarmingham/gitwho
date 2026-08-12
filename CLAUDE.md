@@ -1,4 +1,4 @@
-# gitfriend
+# gitwho
 
 Pick the right git identity **and** the right credentials for a repository —
 automatically, wherever that repository lives on disk — across multiple hosted
@@ -19,9 +19,9 @@ The remaining work is the cutover: **[docs/CUTOVER.md](docs/CUTOVER.md)**, with
 a starting config in [docs/accounts.toml.example](docs/accounts.toml.example).
 Read both before touching anything in `$HOME`.
 
-**Generated but unverified: the Windows paths.** `%APPDATA%\gitfriend` in
+**Generated but unverified: the Windows paths.** `%APPDATA%\gitwho` in
 `src/paths.rs`, the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs`, and the
-fact that gitfriend applies no ACLs there (`Protection::DirectoryInherited`, so
+fact that gitwho applies no ACLs there (`Protection::DirectoryInherited`, so
 `doctor` warns rather than the file being closed down). All are unit-tested as
 pure functions from macOS; none has ever run on Windows. Do not describe them as
 working.
@@ -77,7 +77,7 @@ tooling still works, but **drive it with `jj`**:
 - `jj log` — history. `jj diff` — current change's diff.
 - `jj bookmark set main -r @-` then `jj git push` — bookmarks are jj's branches;
   they do **not** move automatically. Move `main` explicitly before pushing.
-- `main@origin` is tracked. Remote: `github.com/DanielCarmingham/gitfriend`.
+- `main@origin` is tracked. Remote: `github.com/DanielCarmingham/gitwho`.
 - Don't mix `git commit` into a jj workflow here; use `jj` and let colocation
   export to git.
 

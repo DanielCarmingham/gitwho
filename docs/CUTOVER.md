@@ -1,9 +1,15 @@
 # Cutover runbook
 
-Switching this machine from the path-based dotfiles setup to gitfriend.
+Switching this machine from the path-based dotfiles setup to gitwho.
 
-Written 2026-08-09, after every build task was finished and verified. **Nothing
-on the machine has been changed yet.** Everything below is the remaining work.
+**Not an install guide.** This is a migration off one specific pre-existing
+setup, with that machine's paths, hostnames and undo steps throughout. To set
+gitwho up somewhere it has never run, read [INSTALL.md](INSTALL.md) instead.
+
+Written 2026-08-09, after every build task was finished and verified. **Steps
+1–6 were executed on 2026-08-10 and verified; step 7 is partly done.** The
+open items are tracked at the bottom under "Decisions still open" — chiefly
+`~/.zshrc.local`, which still holds a plaintext copy of every token.
 
 Each step says what to do, how to check it worked, and how to undo it. Do them
 in order — later steps depend on earlier ones — and stop at the first
@@ -17,13 +23,13 @@ Built and tested (69 tests, clippy clean):
 
 | Command | What it does |
 |---|---|
-| `gitfriend credential get\|store\|erase` | git credential helper; resolves from the URL git is about to contact |
-| `gitfriend exec [--account X] -- cmd` | runs one command with exactly one account's variables, scrubbing the rest |
-| `gitfriend shim install --dir D names...` | wrapper scripts so `gh`/`tea` route through `exec` |
-| `gitfriend secret init\|set\|list\|delete\|import --from-env` | token storage; values on stdin, only fingerprints printed |
-| `gitfriend sync [--write]` | generates the identity `includeIf` rules |
-| `gitfriend mcp sync [--write] paths...` | routes provider MCP servers through `exec` |
-| `gitfriend doctor` | read-only coherence report; non-zero on problems |
+| `gitwho credential get\|store\|erase` | git credential helper; resolves from the URL git is about to contact |
+| `gitwho exec [--account X] -- cmd` | runs one command with exactly one account's variables, scrubbing the rest |
+| `gitwho shim install --dir D names...` | wrapper scripts so `gh`/`tea` route through `exec` |
+| `gitwho secret init\|set\|list\|delete\|import --from-env` | token storage; values on stdin, only fingerprints printed |
+| `gitwho sync [--write]` | generates the identity `includeIf` rules |
+| `gitwho mcp sync [--write] paths...` | routes provider MCP servers through `exec` |
+| `gitwho doctor` | read-only coherence report; non-zero on problems |
 
 `sync`, `mcp sync` and `doctor` never write unless `--write` is passed.
 `doctor` never writes at all.
@@ -41,7 +47,7 @@ rebuild.
 
 | Where | How | Scope |
 |---|---|---|
-| `GITFRIEND_SECRET_BACKEND=age\|keychain` | environment | one invocation; beats the config |
+| `GITWHO_SECRET_BACKEND=age\|keychain` | environment | one invocation; beats the config |
 | `[defaults] secretBackend = "age"` in `accounts.toml` | config | this machine |
 | nothing | — | `age` |
 
@@ -52,7 +58,7 @@ there is no store at all — a Linux box with no D-Bus session bus — is refuse
 too, naming what is missing. What is *not* checked is whether the store will
 prompt: answering that means opening it, and opening it is the bug.
 
-`gitfriend doctor` prints which store is in effect and what chose it, under
+`gitwho doctor` prints which store is in effect and what chose it, under
 `[backend]`.
 
 ---
@@ -68,8 +74,8 @@ config that breaks the moment you `cargo clean`.
 ```sh
 cargo build --release
 mkdir -p ~/.local/bin
-cp target/release/gitfriend ~/.local/bin/gitfriend   # already on PATH via .zshenv
-which gitfriend                                       # expect ~/.local/bin/gitfriend
+cp target/release/gitwho ~/.local/bin/gitwho   # already on PATH via .zshenv
+which gitwho                                       # expect ~/.local/bin/gitwho
 ```
 
 If this session's `CARGO_TARGET_DIR=target.noindex` is still set in your shell,
@@ -102,10 +108,10 @@ cp ~/.gitconfig-darwin ~/.gitconfig-darwin.pre-gitfriend
 ## Step 1 — Install the config and the secrets
 
 ```sh
-gitfriend secret init                           # creates ~/.config/gitfriend (0700) + identity.key
-cp docs/accounts.toml.example ~/.config/gitfriend/accounts.toml
-chmod 600 ~/.config/gitfriend/accounts.toml     # a redirect vector; doctor fails if it is looser
-$EDITOR ~/.config/gitfriend/accounts.toml      # see "Decisions still open" below
+gitwho secret init                           # creates ~/.config/gitwho (0700) + identity.key
+cp docs/accounts.toml.example ~/.config/gitwho/accounts.toml
+chmod 600 ~/.config/gitwho/accounts.toml     # a redirect vector; doctor fails if it is looser
+$EDITOR ~/.config/gitwho/accounts.toml      # see "Decisions still open" below
 ```
 
 `secret init` first, and not a `mkdir -p`, because it creates the directory
@@ -120,36 +126,36 @@ first run.
 identity file is needed rather than writing a key that decrypts nothing. Run in
 the order above and it has no config to read yet, which is not an error (a
 malformed one is). Run it after the `cp` and it still works; you then have to
-`chmod 700 ~/.config/gitfriend` yourself.
+`chmod 700 ~/.config/gitwho` yourself.
 
 Then import the existing tokens. **This must run in an interactive shell**:
 `~/.zshrc.local` is only sourced for those, and `import` reads the environment
 of the process it runs in.
 
 ```sh
-gitfriend secret import --from-env
-gitfriend secret list
+gitwho secret import --from-env
+gitwho secret list
 ```
 
 **Verify.** `secret list` shows a fingerprint, not `MISSING`, for every row.
 Values are never printed; a fingerprint is the whole check.
 
-**Undo.** `rm -rf ~/.config/gitfriend`. Nothing else references it yet.
+**Undo.** `rm -rf ~/.config/gitwho`. Nothing else references it yet.
 
 ---
 
 ## Step 2 — Generate the identity rules
 
 ```sh
-gitfriend sync                 # dry run; read the output
-gitfriend sync --write
+gitwho sync                 # dry run; read the output
+gitwho sync --write
 ```
 
 Then add the include, once, to `~/.gitconfig-common`:
 
 ```ini
 [include]
-    path = ~/.config/gitfriend/git/includes.gitconfig
+    path = ~/.config/gitwho/git/includes.gitconfig
 ```
 
 Put it **after** the existing `includeIf "gitdir:..."` block so the new rules
@@ -187,7 +193,7 @@ Two changes, both in `~/.gitconfig-darwin`:
 ```ini
 [credential "https://github.com"]
     helper =
-    helper = /Users/daniel/.local/bin/gitfriend credential
+    helper = /Users/daniel/.local/bin/gitwho credential
     useHttpPath = true
 ```
 
@@ -195,12 +201,12 @@ Do the same for the Digilope hosts, which also use https
 (`gitea.digilope.com`), keeping `provider = generic` where it exists.
 
 Leave the general `credential.helper` (git-credential-manager) alone for hosts
-gitfriend does not claim.
+gitwho does not claim.
 
 **Verify:**
 
 ```sh
-gitfriend doctor                        # expect no FAIL lines for [git]
+gitwho doctor                        # expect no FAIL lines for [git]
 git -C ~/Developer/Profound/<repo> fetch
 git -C ~/Developer/DanielCarmingham/<repo> fetch
 ```
@@ -220,7 +226,7 @@ do — recorded so it does not look alarming in `doctor` output later.
 ## Step 4 — Cover the CLIs
 
 ```sh
-gitfriend shim install --dir ~/.local/share/gitfriend/shims gh tea
+gitwho shim install --dir ~/.local/share/gitwho/shims gh tea
 ```
 
 Put that directory on `PATH` — **as the last line of `~/.zshrc`**, not in
@@ -258,8 +264,8 @@ they match, the shim directory is not early enough on `PATH`.
 ## Step 5 — Wrap the MCP servers
 
 ```sh
-gitfriend mcp sync ~/Developer/Digilope/one-drop-visuals/.mcp.json     # dry run
-gitfriend mcp sync --write ~/Developer/Digilope/one-drop-visuals/.mcp.json
+gitwho mcp sync ~/Developer/Digilope/one-drop-visuals/.mcp.json     # dry run
+gitwho mcp sync --write ~/Developer/Digilope/one-drop-visuals/.mcp.json
 ```
 
 That file is the live exposure: it runs `gitea-mcp` with an empty `env` block,
@@ -291,7 +297,7 @@ exposure; everything before it was building the replacement.
 
 ```sh
 env | grep -E 'GH_TOKEN|GITEA_TOKEN'    # expect NOTHING
-gitfriend doctor                         # expect no [ambient] warnings
+gitwho doctor                         # expect no [ambient] warnings
 cd ~/Developer/Profound/<repo> && git fetch && gh api user --jq .login
 ```
 
@@ -306,7 +312,7 @@ The `[ambient]` warnings disappearing is the whole point of the project.
 
 ```sh
 git --git-dir=/Users/daniel/.cfg --work-tree=/Users/daniel add -f \
-    .config/gitfriend/accounts.toml .config/direnv/direnvrc .gitconfig-darwin
+    .config/gitwho/accounts.toml .config/direnv/direnvrc .gitconfig-darwin
 git --git-dir=/Users/daniel/.cfg --work-tree=/Users/daniel commit
 ```
 
@@ -315,7 +321,7 @@ variables only.
 
 Then rewrite `~/ACCOUNTS.md`: it describes the old path-based system and is
 wrong the moment step 2 lands. Adding an account should become one
-`accounts.toml` entry plus one `gitfriend secret set`.
+`accounts.toml` entry plus one `gitwho secret set`.
 
 Sanity-check the claim that a new provider is cheap: adding Codeberg should be
 ~6 lines with `provider = "gitea"` and a different host, no mechanism change.
@@ -351,7 +357,7 @@ Likely safe to revoke — but confirm nothing consumes them first, since that is
 still unknown.
 
 **Do not switch to fine-grained PATs as part of the cutover.** They would fail
-in a way that looks like gitfriend being broken. Getting there means an org
+in a way that looks like gitwho being broken. Getting there means an org
 settings change first, which may not be yours to make.
 
 **Keychain.** Blocked on whether signing the installed binary with a stable
@@ -361,11 +367,11 @@ does not depend on a key file sitting next to the data.
 
 ---
 
-## Digilope is broken independently of gitfriend
+## Digilope is broken independently of gitwho
 
 Found 2026-08-10 while running the cutover. Gitea was migrated to Forgejo and
-**nothing on this machine followed**. None of this is caused by gitfriend, and
-none of it is fixed by it — but it will look like gitfriend's fault if you meet
+**nothing on this machine followed**. None of this is caused by gitwho, and
+none of it is fixed by it — but it will look like gitwho's fault if you meet
 it mid-cutover.
 
 Naming follows the same convention as Gitea did: `forgejo.digilope.com` is the
@@ -382,7 +388,7 @@ What is actually established:
 
 1. **The token is dead.** `GITEA_TOKEN` gets a 401 from
    `forgejo.digilope.com`, which is a real host with a real certificate. Issue
-   a new token in Forgejo, then `gitfriend secret set Digilope GITEA_TOKEN`.
+   a new token in Forgejo, then `gitwho secret set Digilope GITEA_TOKEN`.
    The dead value is currently stored, so `doctor` reports it present — it
    cannot yet tell dead from live (the `--check-remote` stretch task).
 2. **The ssh path is unresolved.** `id_ed25519_Digilope_Gitea_Daniel` is
@@ -401,7 +407,7 @@ been rotated; the replacement works. `GH_TOKEN_DanielAtProfound` works.
 `GH_TOKEN_DanielAtKitchenCloud` has **not** been checked.
 
 **Do not `secret import --from-env` and assume the result is usable** — you
-would import a dead credential and then spend the cutover debugging gitfriend
+would import a dead credential and then spend the cutover debugging gitwho
 for it. Note also that `~/.zshrc.local` holds a *copy*: rotating via
 `gh auth login` updates gh's own store, not that file, so the two drift.
 
@@ -432,7 +438,7 @@ blocker was that an ad-hoc signature changes on every rebuild, which is what
 made macOS prompt. `examples/keychain_probe.rs` settles whether signing fixes
 it. See the dex task.
 
-Switching once the probe passes is now `GITFRIEND_SECRET_BACKEND=keychain` for
+Switching once the probe passes is now `GITWHO_SECRET_BACKEND=keychain` for
 one command, or `secretBackend = "keychain"` under `[defaults]` for the machine
 — not an edit to `main.rs` and a rebuild. What the probe unblocks is therefore
 the decision, not the plumbing. Nothing chooses the Keychain automatically even
@@ -450,7 +456,7 @@ directory was `0755` and `accounts.toml` was `0644`, both fixed by hand.
 Writing the check first and the writer second was the wrong order: `doctor`
 demanded `0700` while `secret init` created the directory with `create_dir_all`,
 which applies the umask — so every fresh install failed a check on permissions
-gitfriend itself had set. `secret init` now creates the directory owner-only, and
+gitwho itself had set. `secret init` now creates the directory owner-only, and
 the identity key and `secrets.age` are opened `0600` rather than written and
 then chmodded, which left them complete on disk at `0644` for the width of the
 chmod. `accounts.toml` is still copied by hand and still matters most — it is a
@@ -471,7 +477,7 @@ reduce that.
 
 - **The binary path is baked in.** Shims and wrapped MCP commands record the
   path of the binary that generated them. Re-run `shim install` and `mcp sync`
-  after moving or reinstalling gitfriend.
+  after moving or reinstalling gitwho.
 - **`secret import --from-env` needs an interactive shell**, because
   `~/.zshrc.local` is only sourced there.
 - **A url-scoped credential section beats the global one.** If `doctor` says

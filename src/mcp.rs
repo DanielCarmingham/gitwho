@@ -53,22 +53,22 @@ fn is_provider_server(server: &Map<String, Value>) -> bool {
         .any(|marker| haystack.contains(marker))
 }
 
-/// Already launching through gitfriend?
+/// Already launching through gitwho?
 fn is_wrapped(server: &Map<String, Value>) -> bool {
     let Some(Value::Array(args)) = server.get("args") else {
         return false;
     };
     // The command path varies by install location, so the reliable signal is
-    // the argument shape gitfriend itself writes.
+    // the argument shape gitwho itself writes.
     matches!(args.first(), Some(Value::String(first)) if first == "exec")
 }
 
-/// Rewrite provider servers to launch through `gitfriend exec`.
+/// Rewrite provider servers to launch through `gitwho exec`.
 ///
 /// Returns the new document and the names of the servers changed. Servers that
 /// touch no provider, and servers already wrapped, are left exactly as they
 /// were.
-pub fn wrap(json: &str, gitfriend_path: &str) -> Result<(String, Vec<String>), McpError> {
+pub fn wrap(json: &str, gitwho_path: &str) -> Result<(String, Vec<String>), McpError> {
     let mut doc: Value = serde_json::from_str(json)?;
     let mut changed = Vec::new();
 
@@ -98,7 +98,7 @@ pub fn wrap(json: &str, gitfriend_path: &str) -> Result<(String, Vec<String>), M
 
             server.insert(
                 "command".to_string(),
-                Value::String(gitfriend_path.to_string()),
+                Value::String(gitwho_path.to_string()),
             );
             server.insert("args".to_string(), Value::Array(new_args));
             changed.push(name.clone());

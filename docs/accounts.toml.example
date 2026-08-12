@@ -1,4 +1,4 @@
-# Starting point for ~/.config/gitfriend/accounts.toml.
+# Starting point for ~/.config/gitwho/accounts.toml.
 #
 # Not a hypothetical example: the match patterns were derived on 2026-08-09 by
 # reading the origin remote of every repository under ~/Developer, so they

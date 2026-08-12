@@ -1,4 +1,4 @@
-//! Where gitfriend looks for its own files.
+//! Where gitwho looks for its own files.
 //!
 //! Both the environment *and* the platform layout are injected, so the Windows
 //! answer is exercised from this Mac and nothing here depends on the
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use gitfriend::paths::{config_dir, Layout, PathError};
+use gitwho::paths::{config_dir, Layout, PathError};
 
 /// The environment as a lookup, which is the shape `config_dir` takes: a map of
 /// everything would mean decoding variables it has no business reading.
@@ -25,8 +25,8 @@ fn the_config_directory_hangs_off_home() {
     let dir = dir_for(&[("HOME", "/Users/someone")], Layout::Unix).unwrap();
 
     assert!(
-        dir.ends_with("gitfriend"),
-        "expected gitfriend's own directory; got {}",
+        dir.ends_with("gitwho"),
+        "expected gitwho's own directory; got {}",
         dir.display()
     );
     assert!(
@@ -69,7 +69,7 @@ fn the_windows_layout_puts_the_store_under_appdata() {
 
     assert_eq!(
         dir,
-        PathBuf::from(r"C:\Users\someone\AppData\Roaming").join("gitfriend"),
+        PathBuf::from(r"C:\Users\someone\AppData\Roaming").join("gitwho"),
         "APPDATA is where Windows keeps per-user application data; got {}",
         dir.display()
     );
@@ -115,7 +115,7 @@ fn the_layout_and_not_the_host_decides_which_variable_is_consulted() {
 }
 
 /// The bug this replaces: `HOME` missing produced a *relative* path, so
-/// gitfriend read its config out of the current working directory. Wrong and
+/// gitwho read its config out of the current working directory. Wrong and
 /// quiet is worse than broken and loud (R8).
 #[test]
 fn no_home_variable_at_all_is_an_error_naming_both() {

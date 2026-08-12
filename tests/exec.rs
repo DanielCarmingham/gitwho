@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use gitfriend::config::Config;
-use gitfriend::exec::plan_env;
-use gitfriend::secrets::EnvBackend;
+use gitwho::config::Config;
+use gitwho::exec::plan_env;
+use gitwho::secrets::EnvBackend;
 
 /// Two providers, so one account's variables are another's contamination.
 const ACCOUNTS: &str = r#"

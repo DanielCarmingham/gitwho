@@ -5,7 +5,7 @@
 //! (defaulting to Personal and Work). Values here are obvious dummies -- this
 //! is never a path for real credentials.
 
-use gitfriend::secrets::{AgeFileBackend, Backend};
+use gitwho::secrets::{AgeFileBackend, Backend};
 
 fn main() {
     let mut args = std::env::args().skip(1);

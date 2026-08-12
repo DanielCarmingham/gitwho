@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gitfriend::secrets::{Backend, EnvBackend};
+use gitwho::secrets::{Backend, EnvBackend};
 
 /// The env backend exists to read the scheme already on this machine:
 /// `~/.zshrc.local` exports `GH_TOKEN_DanielAtProfound` and friends. Keeping
@@ -22,7 +22,7 @@ fn the_env_backend_reads_the_var_suffixed_with_the_account_name() {
 fn a_fingerprint_does_not_contain_the_value_it_identifies() {
     let secret = "ghp_exampletokenmaterial1234567890";
 
-    let fp = gitfriend::secrets::fingerprint(secret);
+    let fp = gitwho::secrets::fingerprint(secret);
 
     assert!(
         !fp.contains("exampletokenmaterial"),
@@ -36,10 +36,10 @@ fn a_fingerprint_does_not_contain_the_value_it_identifies() {
 
 #[test]
 fn fingerprints_distinguish_different_values_and_are_stable() {
-    let fp = gitfriend::secrets::fingerprint("token-a");
+    let fp = gitwho::secrets::fingerprint("token-a");
 
-    assert_eq!(fp, gitfriend::secrets::fingerprint("token-a"));
-    assert_ne!(fp, gitfriend::secrets::fingerprint("token-b"));
+    assert_eq!(fp, gitwho::secrets::fingerprint("token-a"));
+    assert_ne!(fp, gitwho::secrets::fingerprint("token-b"));
 }
 
 #[test]
@@ -56,9 +56,9 @@ fn a_missing_secret_is_absence_not_an_error() {
 #[test]
 #[ignore = "touches the real login keychain; run explicitly with --ignored"]
 fn the_keychain_backend_round_trips_and_deletes() {
-    use gitfriend::secrets::KeychainBackend;
+    use gitwho::secrets::KeychainBackend;
 
-    let backend = KeychainBackend::with_service("gitfriend-selftest");
+    let backend = KeychainBackend::with_service("gitwho-selftest");
     let _ = backend.delete("SelfTest", "GH_TOKEN");
 
     backend.set("SelfTest", "GH_TOKEN", "value-one").unwrap();
@@ -78,10 +78,10 @@ fn the_keychain_backend_round_trips_and_deletes() {
 // the substitute -- a real age-encrypted file, not a stub, so the code under
 // test is the code that ships.
 
-fn test_backend(dir: &tempfile::TempDir) -> gitfriend::secrets::AgeFileBackend {
+fn test_backend(dir: &tempfile::TempDir) -> gitwho::secrets::AgeFileBackend {
     let key_path = dir.path().join("identity.key");
-    gitfriend::secrets::AgeFileBackend::generate_identity_file(&key_path).unwrap();
-    gitfriend::secrets::AgeFileBackend::with_identity_file(dir.path().join("secrets.age"), &key_path)
+    gitwho::secrets::AgeFileBackend::generate_identity_file(&key_path).unwrap();
+    gitwho::secrets::AgeFileBackend::with_identity_file(dir.path().join("secrets.age"), &key_path)
         .unwrap()
 }
 
@@ -103,9 +103,9 @@ fn the_age_backend_never_writes_plaintext_to_disk() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("secrets.age");
     let key_path = dir.path().join("identity.key");
-    gitfriend::secrets::AgeFileBackend::generate_identity_file(&key_path).unwrap();
+    gitwho::secrets::AgeFileBackend::generate_identity_file(&key_path).unwrap();
     let backend =
-        gitfriend::secrets::AgeFileBackend::with_identity_file(path.clone(), &key_path).unwrap();
+        gitwho::secrets::AgeFileBackend::with_identity_file(path.clone(), &key_path).unwrap();
 
     backend
         .set("Work", "GH_TOKEN", "supersecrettokenvalue")
@@ -131,13 +131,13 @@ fn the_age_backend_never_writes_plaintext_to_disk() {
 /// cannot be made, `doctor` says so instead.
 #[test]
 fn the_backend_states_what_protection_it_could_actually_apply() {
-    use gitfriend::secrets::Protection;
+    use gitwho::secrets::Protection;
 
     let dir = tempfile::tempdir().unwrap();
     let backend = test_backend(&dir);
     backend.set("Work", "GH_TOKEN", "token-value").unwrap();
 
-    let owner_only = gitfriend::secrets::AgeFileBackend::protection() == Protection::OwnerOnly;
+    let owner_only = gitwho::secrets::AgeFileBackend::protection() == Protection::OwnerOnly;
 
     // The claim must track the platform. Flipping the cfg behind
     // `Protection::HOST` without meaning to would silently turn the check below
@@ -194,14 +194,14 @@ fn a_pasted_value_loses_its_trailing_newline() {
     // Piping through `echo`, a heredoc, or a paste that ends in Enter all add
     // one. Sent as part of the token it is rejected by the server, with an
     // error that says nothing about whitespace.
-    let value = gitfriend::secrets::read_value_from(&mut "tok-value\n".as_bytes()).unwrap();
+    let value = gitwho::secrets::read_value_from(&mut "tok-value\n".as_bytes()).unwrap();
 
     assert_eq!(value, "tok-value");
 }
 
 #[test]
 fn surrounding_whitespace_from_a_paste_is_removed() {
-    let value = gitfriend::secrets::read_value_from(&mut "  tok-value \r\n".as_bytes()).unwrap();
+    let value = gitwho::secrets::read_value_from(&mut "  tok-value \r\n".as_bytes()).unwrap();
 
     assert_eq!(value, "tok-value");
 }
@@ -210,7 +210,7 @@ fn surrounding_whitespace_from_a_paste_is_removed() {
 fn an_empty_value_is_refused_rather_than_stored() {
     // Storing an empty string would satisfy every "is it present?" check while
     // authenticating as nobody.
-    let error = gitfriend::secrets::read_value_from(&mut "   \n".as_bytes())
+    let error = gitwho::secrets::read_value_from(&mut "   \n".as_bytes())
         .expect_err("an empty value must be refused");
 
     assert!(error.to_string().contains("empty"), "got: {error}");

@@ -1,4 +1,4 @@
-use gitfriend::config::Config;
+use gitwho::config::Config;
 
 #[test]
 fn parses_an_account_with_its_match_patterns() {

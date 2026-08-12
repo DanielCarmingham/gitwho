@@ -38,7 +38,7 @@ impl Finding {
     }
 }
 
-/// The parts of git's configuration that decide whether gitfriend is reachable.
+/// The parts of git's configuration that decide whether gitwho is reachable.
 #[derive(Debug, Default)]
 pub struct GitWiring {
     /// The `credential.helper` values in effect globally, resets already
@@ -77,7 +77,7 @@ pub struct Store {
     /// halves matter: `accounts.toml` saying one thing while the shell says
     /// another is precisely when someone runs `doctor`.
     pub backend: Choice,
-    /// Whether gitfriend could apply owner-only permissions at all.
+    /// Whether gitwho could apply owner-only permissions at all.
     ///
     /// False on Windows, where it writes no ACLs and the files inherit the
     /// directory's. Carried as a fact to report rather than closed with code
@@ -163,7 +163,7 @@ fn check_permissions(store: &Store, findings: &mut Vec<Finding>) {
     let mut clean = true;
 
     for (path, want, stake) in expected {
-        // Symlinks are followed on purpose: the target is what gitfriend
+        // Symlinks are followed on purpose: the target is what gitwho
         // actually reads. One pointing into a world-writable directory is a
         // residual gap this does not close.
         let meta = match std::fs::metadata(path) {
@@ -194,7 +194,7 @@ fn check_permissions(store: &Store, findings: &mut Vec<Finding>) {
             findings.push(Finding::new(
                 Level::Problem,
                 "permissions",
-                // With the remedy, because nothing in gitfriend applies one:
+                // With the remedy, because nothing in gitwho applies one:
                 // `doctor` reports and `sync` writes gitconfig, and
                 // `accounts.toml` arrives by hand from the example. A finding
                 // naming only the stake is one an operator learns to read past.
@@ -386,25 +386,25 @@ fn check_ambient(config: &Config, env: &BTreeMap<String, String>, findings: &mut
 
 fn check_git_wiring(git: &GitWiring, findings: &mut Vec<Finding>) {
     // What github.com resolves to is the question that decides whether
-    // gitfriend is reached at all, because a URL-scoped section wins outright.
+    // gitwho is reached at all, because a URL-scoped section wins outright.
     match &git.github_helper {
-        Some(helper) if helper.contains("gitfriend") => {}
+        Some(helper) if helper.contains("gitwho") => {}
         Some(helper) => findings.push(Finding::new(
             Level::Problem,
             "git",
-            format!("github.com is served by {helper}, not gitfriend"),
+            format!("github.com is served by {helper}, not gitwho"),
         )),
         None => {
             let wired = git
                 .credential_helpers
                 .iter()
-                .any(|helper| helper.contains("gitfriend"));
+                .any(|helper| helper.contains("gitwho"));
             if !wired {
                 findings.push(Finding::new(
                     Level::Problem,
                     "git",
                     format!(
-                        "credential.helper does not mention gitfriend (in effect: {})",
+                        "credential.helper does not mention gitwho (in effect: {})",
                         if git.credential_helpers.is_empty() {
                             "nothing".to_string()
                         } else {

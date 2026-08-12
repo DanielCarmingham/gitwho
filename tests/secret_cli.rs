@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use gitfriend::secrets::fingerprint;
+use gitwho::secrets::fingerprint;
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -28,25 +28,25 @@ fn setup(dir: &Path) {
     std::fs::write(dir.join("accounts.toml"), ACCOUNTS).unwrap();
 }
 
-fn gitfriend(dir: &Path, args: &[&str]) -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitfriend"));
+fn gitwho(dir: &Path, args: &[&str]) -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gitwho"));
     cmd.args(args)
-        .env("GITFRIEND_CONFIG", dir.join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.join("identity.key"))
+        .env("GITWHO_CONFIG", dir.join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.join("identity.key"))
         // Cleared, not merely unset here: it is the highest-precedence backend
         // selector, so a developer who exported it -- as CUTOVER.md tells them
         // to -- would otherwise point this suite at their real login keychain.
-        .env_remove("GITFRIEND_SECRET_BACKEND");
+        .env_remove("GITWHO_SECRET_BACKEND");
     cmd
 }
 
 fn run(dir: &Path, args: &[&str]) -> std::process::Output {
-    gitfriend(dir, args).output().unwrap()
+    gitwho(dir, args).output().unwrap()
 }
 
 fn run_with_stdin(dir: &Path, args: &[&str], input: &str) -> std::process::Output {
-    let mut child = gitfriend(dir, args)
+    let mut child = gitwho(dir, args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -136,11 +136,11 @@ fn secret_list_reports_declared_variables_with_no_stored_value() {
 
 /// Whichever platform this runs on, something must be asserted. The `cfg(unix)`
 /// block used to be the whole body, so on Windows -- the one platform where
-/// gitfriend cannot apply the mode -- the test passed while checking nothing.
+/// gitwho cannot apply the mode -- the test passed while checking nothing.
 /// Where the promise cannot be kept, the promise is that `doctor` says so.
 #[test]
 fn the_identity_and_secrets_files_are_owner_only() {
-    use gitfriend::secrets::{AgeFileBackend, Protection};
+    use gitwho::secrets::{AgeFileBackend, Protection};
 
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
@@ -195,8 +195,8 @@ fn the_environment_overrides_the_configured_backend() {
     .unwrap();
 
     let with_override = |args: &[&str]| {
-        let mut cmd = gitfriend(dir.path(), args);
-        cmd.env("GITFRIEND_SECRET_BACKEND", "age");
+        let mut cmd = gitwho(dir.path(), args);
+        cmd.env("GITWHO_SECRET_BACKEND", "age");
         cmd
     };
 
@@ -268,7 +268,7 @@ fn import_from_the_environment_preserves_the_value() {
     setup(dir.path());
     run(dir.path(), &["secret", "init"]);
 
-    let imported = gitfriend(dir.path(), &["secret", "import", "--from-env"])
+    let imported = gitwho(dir.path(), &["secret", "import", "--from-env"])
         .env("GH_TOKEN_Personal", "existing-personal-token")
         .env("GITEA_TOKEN_Digilope", "existing-gitea-token")
         .output()
@@ -314,7 +314,7 @@ fn setting_a_secret_for_an_unknown_account_is_refused() {
     );
 }
 
-/// A fresh install has to pass gitfriend's own `doctor`, and `doctor` requires
+/// A fresh install has to pass gitwho's own `doctor`, and `doctor` requires
 /// the store directory to be `0700` -- it is the only thing keeping the
 /// identity key and every stored token out of another local account's reach.
 /// `create_dir_all` applies the umask, so the ubiquitous `022` left it `0755`
@@ -328,18 +328,18 @@ fn secret_init_creates_the_store_directory_owner_only() {
     use std::os::unix::fs::PermissionsExt;
 
     let home = tempfile::tempdir().unwrap();
-    let store = home.path().join(".config").join("gitfriend");
+    let store = home.path().join(".config").join("gitwho");
 
     let out = Command::new("/bin/sh")
         .args([
             "-c",
             "umask 022; exec \"$0\" secret init",
-            env!("CARGO_BIN_EXE_gitfriend"),
+            env!("CARGO_BIN_EXE_gitwho"),
         ])
-        .env("GITFRIEND_CONFIG", store.join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", store.join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", store.join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", store.join("accounts.toml"))
+        .env("GITWHO_SECRETS", store.join("secrets.age"))
+        .env("GITWHO_IDENTITY", store.join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .output()
         .unwrap();
     assert!(
@@ -355,7 +355,7 @@ fn secret_init_creates_the_store_directory_owner_only() {
     );
 }
 
-/// The harness itself, not the binary. `GITFRIEND_SECRET_BACKEND` is the
+/// The harness itself, not the binary. `GITWHO_SECRET_BACKEND` is the
 /// highest-precedence backend selector and `docs/CUTOVER.md` tells the operator
 /// to export it -- so a developer following the docs would turn this suite into
 /// one that writes test values into the real login keychain and blocks on the
@@ -363,10 +363,10 @@ fn secret_init_creates_the_store_directory_owner_only() {
 #[test]
 fn the_harness_clears_the_backend_override_so_no_test_can_reach_a_real_keychain() {
     let dir = tempfile::tempdir().unwrap();
-    let cmd = gitfriend(dir.path(), &["secret", "list"]);
+    let cmd = gitwho(dir.path(), &["secret", "list"]);
 
     let cleared = cmd.get_envs().any(|(var, value)| {
-        var == std::ffi::OsStr::new("GITFRIEND_SECRET_BACKEND") && value.is_none()
+        var == std::ffi::OsStr::new("GITWHO_SECRET_BACKEND") && value.is_none()
     });
 
     assert!(

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use gitfriend::secrets::{AgeFileBackend, Backend};
+use gitwho::secrets::{AgeFileBackend, Backend};
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -33,7 +33,7 @@ fn fixture(dir: &Path) {
     backend.set("Work", "GH_TOKEN", "work-token").unwrap();
 }
 
-/// Ask real git to fill a credential, with gitfriend configured as the helper.
+/// Ask real git to fill a credential, with gitwho configured as the helper.
 ///
 /// This is the end-to-end proof: git decides when and how to call the helper,
 /// so a passing result means the protocol is genuinely understood, not just
@@ -43,7 +43,7 @@ fn git_credential_fill(dir: &Path, url: &str) -> std::process::Output {
 }
 
 fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Output {
-    let helper = format!("{} credential", env!("CARGO_BIN_EXE_gitfriend"));
+    let helper = format!("{} credential", env!("CARGO_BIN_EXE_gitwho"));
 
     let mut child = Command::new("git")
         .args([
@@ -63,10 +63,10 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Ou
         // like a pass under a timeout, and a prompt would mean the helper
         // declined without us noticing.
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GITFRIEND_CONFIG", dir.join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -85,7 +85,7 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Ou
 }
 
 #[test]
-fn git_asks_gitfriend_and_gets_the_token_for_that_org() {
+fn git_asks_gitwho_and_gets_the_token_for_that_org() {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
 
@@ -181,42 +181,42 @@ fn an_unclaimed_host_gets_no_credential_from_the_real_binary() {
 /// Unicode -- a legacy locale, a path off a non-UTF-8 filesystem, anything a
 /// tool exported. git reads a failed helper as "no credential" and falls
 /// through to a prompt, so the whole design would be defeated by a variable
-/// gitfriend has no interest in.
+/// gitwho has no interest in.
 #[cfg(unix)]
 #[test]
 fn a_non_unicode_variable_elsewhere_in_the_environment_is_ignored() {
     use std::io::Write;
     use std::os::unix::ffi::OsStringExt;
 
-    // A real HOME rather than the GITFRIEND_* overrides the other tests use:
+    // A real HOME rather than the GITWHO_* overrides the other tests use:
     // those short-circuit before the environment is ever consulted, which is
     // exactly why this went unnoticed.
     let home = tempfile::tempdir().unwrap();
-    let store = home.path().join(".config").join("gitfriend");
+    let store = home.path().join(".config").join("gitwho");
     std::fs::create_dir_all(&store).unwrap();
     fixture(&store);
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gitfriend"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitwho"));
     command
         .args(["credential", "get"])
         .env("HOME", home.path())
-        // Not valid UTF-8, and nothing to do with gitfriend.
+        // Not valid UTF-8, and nothing to do with gitwho.
         .env(
-            "GITFRIEND_TEST_BYSTANDER",
+            "GITWHO_TEST_BYSTANDER",
             std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
         )
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     for var in [
-        "GITFRIEND_CONFIG",
-        "GITFRIEND_SECRETS",
-        "GITFRIEND_IDENTITY",
-        "GITFRIEND_SECRET_BACKEND",
+        "GITWHO_CONFIG",
+        "GITWHO_SECRETS",
+        "GITWHO_IDENTITY",
+        "GITWHO_SECRET_BACKEND",
     ] {
         command.env_remove(var);
     }
-    let mut child = command.spawn().expect("gitfriend should run");
+    let mut child = command.spawn().expect("gitwho should run");
 
     child
         .stdin
@@ -298,13 +298,13 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
         "gitea@app-gitea.digilope.com:daniel/site.git",
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gitwho"))
         .args(["exec", "--", "/usr/bin/env"])
         .current_dir(&repo)
-        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .output()
         .unwrap();
@@ -335,12 +335,12 @@ fn a_generated_shim_routes_a_cli_through_exec() {
     );
     let shim_dir = dir.path().join("shims");
 
-    let install = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+    let install = Command::new(env!("CARGO_BIN_EXE_gitwho"))
         .args(["shim", "install", "--dir"])
         .arg(&shim_dir)
         .arg("env")
-        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .output()
         .unwrap();
     assert!(
@@ -351,10 +351,10 @@ fn a_generated_shim_routes_a_cli_through_exec() {
 
     let output = Command::new(shim_dir.join("env"))
         .current_dir(&repo)
-        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .env(
             "PATH",
@@ -393,13 +393,13 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         "https://github.com/microsoft/vscode.git",
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gitwho"))
         .args(["exec", "--", "/usr/bin/env"])
         .current_dir(&repo)
-        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .output()
         .unwrap();
 
@@ -415,14 +415,14 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
     );
 }
 
-/// With no home directory to resolve against, gitfriend used to fall back to a
-/// *relative* path and read `.config/gitfriend/accounts.toml` from wherever it
+/// With no home directory to resolve against, gitwho used to fall back to a
+/// *relative* path and read `.config/gitwho/accounts.toml` from wherever it
 /// was standing. A config planted in a working tree decides which host is
 /// handed which token, so it must refuse rather than obey (R8).
 #[test]
 fn a_missing_home_does_not_read_config_from_the_working_directory() {
     let dir = tempfile::tempdir().unwrap();
-    let ambush = dir.path().join(".config").join("gitfriend");
+    let ambush = dir.path().join(".config").join("gitwho");
     std::fs::create_dir_all(&ambush).unwrap();
     std::fs::write(
         ambush.join("accounts.toml"),
@@ -443,7 +443,7 @@ fn a_missing_home_does_not_read_config_from_the_working_directory() {
     // `sync --dir` is the cheapest subcommand that reads accounts.toml and
     // nothing else, so a config that was read is visible in the output as a
     // generated `<Account>.gitconfig`.
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gitfriend"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitwho"));
     command
         .args(["sync", "--dir"])
         .arg(dir.path().join("out"))
@@ -452,11 +452,11 @@ fn a_missing_home_does_not_read_config_from_the_working_directory() {
         "HOME",
         "USERPROFILE",
         "APPDATA",
-        "GITFRIEND_CONFIG",
-        "GITFRIEND_SECRETS",
-        "GITFRIEND_IDENTITY",
-        "GITFRIEND_GIT_DIR",
-        "GITFRIEND_SECRET_BACKEND",
+        "GITWHO_CONFIG",
+        "GITWHO_SECRETS",
+        "GITWHO_IDENTITY",
+        "GITWHO_GIT_DIR",
+        "GITWHO_SECRET_BACKEND",
     ] {
         command.env_remove(var);
     }
@@ -499,17 +499,17 @@ fn doctor_reports_a_world_readable_config_file() {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gitfriend"))
+    let output = Command::new(env!("CARGO_BIN_EXE_gitwho"))
         .arg("doctor")
         // Without an emptied git config the assertion would depend on the
         // developer's own machine. Doctor then FAILs for unrelated and correct
         // reasons, so this asserts on the line rather than the exit code.
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GITFRIEND_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITFRIEND_SECRETS", dir.path().join("secrets.age"))
-        .env("GITFRIEND_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITFRIEND_SECRET_BACKEND")
+        .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
+        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
+        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
+        .env_remove("GITWHO_SECRET_BACKEND")
         .output()
         .unwrap();
 

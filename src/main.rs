@@ -7,15 +7,15 @@ use std::sync::OnceLock;
 
 use clap::{Parser, Subcommand};
 
-use gitfriend::config::Config;
-use gitfriend::credential::{respond, Request};
-use gitfriend::exec::plan_env;
-use gitfriend::resolve::{resolve_repo, Reason};
-use gitfriend::secrets::select::{self, BackendKind, Choice, Platform};
-use gitfriend::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
+use gitwho::config::Config;
+use gitwho::credential::{respond, Request};
+use gitwho::exec::plan_env;
+use gitwho::resolve::{resolve_repo, Reason};
+use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
+use gitwho::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
 
 #[derive(Parser)]
-#[command(name = "gitfriend", version, about = "Per-repository git identity and credentials")]
+#[command(name = "gitwho", version, about = "Per-repository git identity and credentials")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -26,7 +26,7 @@ enum Command {
     /// Speak the git credential helper protocol on stdin/stdout.
     ///
     /// Configure with:
-    ///     git config --global credential.helper "gitfriend credential"
+    ///     git config --global credential.helper "gitwho credential"
     ///     git config --global credential.useHttpPath true
     Credential {
         /// `get`, `store`, or `erase` -- supplied by git.
@@ -37,7 +37,7 @@ enum Command {
     ///
     /// Variables managed by any account are cleared first, then the resolved
     /// account's are set, so nothing inherited from the shell survives:
-    ///     gitfriend exec -- gh pr list
+    ///     gitwho exec -- gh pr list
     Exec {
         /// Use this account instead of resolving one from the current repo.
         #[arg(long)]
@@ -52,7 +52,7 @@ enum Command {
 
     /// Generate the git config that selects an identity per repository.
     ///
-    /// Writes only into gitfriend's own directory. Include it once from your
+    /// Writes only into gitwho's own directory. Include it once from your
     /// main gitconfig; nothing hand-written is ever rewritten.
     Sync {
         /// Directory to generate into.
@@ -142,42 +142,42 @@ fn main() -> ExitCode {
         Command::Doctor => match doctor_report() {
             Ok(code) => code,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
         Command::Sync { dir, write } => match sync_config(dir, write) {
             Ok(code) => code,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
         Command::Mcp { action } => match mcp(action) {
             Ok(code) => code,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
         Command::Secret { action } => match secret(action) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
         Command::Shim { action } => match shim(action) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
         Command::Exec { account, command } => match exec(account.as_deref(), &command) {
             Ok(code) => code,
             Err(message) => {
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
@@ -190,17 +190,17 @@ fn doctor_report() -> Result<ExitCode, String> {
     let backend = backend.as_ref();
 
     let ambient: std::collections::BTreeMap<String, String> = unicode_env().collect();
-    let wiring = gitfriend::doctor::GitWiring {
-        credential_helpers: gitfriend::git::credential_helpers(),
-        github_helper: gitfriend::git::credential_helper_for("https://github.com"),
-        use_http_path: gitfriend::git::use_http_path_for_github(),
+    let wiring = gitwho::doctor::GitWiring {
+        credential_helpers: gitwho::git::credential_helpers(),
+        github_helper: gitwho::git::credential_helper_for("https://github.com"),
+        use_http_path: gitwho::git::use_http_path_for_github(),
     };
 
     // The directory is taken from the config's own parent rather than assumed
-    // to be `~/.config/gitfriend`, so the environment overrides below keep
+    // to be `~/.config/gitwho`, so the environment overrides below keep
     // pointing everything at one place.
     let config_file = config_path()?;
-    let store = gitfriend::doctor::Store {
+    let store = gitwho::doctor::Store {
         dir: config_file
             .parent()
             .map(PathBuf::from)
@@ -208,24 +208,24 @@ fn doctor_report() -> Result<ExitCode, String> {
         config: config_file,
         identity: identity_path()?,
         secrets: secrets_path()?,
-        owner: gitfriend::doctor::current_uid(),
+        owner: gitwho::doctor::current_uid(),
         backend: choice,
         owner_only_enforced: AgeFileBackend::protection()
-            == gitfriend::secrets::Protection::OwnerOnly,
+            == gitwho::secrets::Protection::OwnerOnly,
     };
 
-    let findings = gitfriend::doctor::run(&config, backend, &ambient, &wiring, &store);
+    let findings = gitwho::doctor::run(&config, backend, &ambient, &wiring, &store);
 
     for finding in &findings {
         let tag = match finding.level {
-            gitfriend::doctor::Level::Ok => "ok  ",
-            gitfriend::doctor::Level::Warn => "warn",
-            gitfriend::doctor::Level::Problem => "FAIL",
+            gitwho::doctor::Level::Ok => "ok  ",
+            gitwho::doctor::Level::Warn => "warn",
+            gitwho::doctor::Level::Problem => "FAIL",
         };
         println!("{tag} [{}] {}", finding.check, finding.message);
     }
 
-    if gitfriend::doctor::has_problems(&findings) {
+    if gitwho::doctor::has_problems(&findings) {
         println!();
         println!("doctor found problems; nothing was changed");
         return Ok(ExitCode::FAILURE);
@@ -237,10 +237,10 @@ fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
     let dir = match dir {
         Some(dir) => dir,
-        None => path_from_env("GITFRIEND_GIT_DIR", "git")?,
+        None => path_from_env("GITWHO_GIT_DIR", "git")?,
     };
 
-    let plan = gitfriend::sync::plan(&config, &dir);
+    let plan = gitwho::sync::plan(&config, &dir);
 
     if !write {
         for file in &plan.files {
@@ -260,7 +260,7 @@ fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let changed = gitfriend::sync::apply(&plan).map_err(|e| e.to_string())?;
+    let changed = gitwho::sync::apply(&plan).map_err(|e| e.to_string())?;
     if changed.is_empty() {
         println!("already up to date");
     } else {
@@ -274,7 +274,7 @@ fn sync_config(dir: Option<PathBuf>, write: bool) -> Result<ExitCode, String> {
 fn mcp(action: McpAction) -> Result<ExitCode, String> {
     let McpAction::Sync { paths, write } = action;
 
-    let gitfriend = std::env::current_exe()
+    let gitwho = std::env::current_exe()
         .map_err(|e| format!("cannot find my own path: {e}"))?
         .to_string_lossy()
         .into_owned();
@@ -286,7 +286,7 @@ fn mcp(action: McpAction) -> Result<ExitCode, String> {
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
         let (rewritten, changed) =
-            gitfriend::mcp::wrap(&original, &gitfriend).map_err(|e| format!("{}: {e}", path.display()))?;
+            gitwho::mcp::wrap(&original, &gitwho).map_err(|e| format!("{}: {e}", path.display()))?;
 
         if changed.is_empty() {
             println!("{}: nothing to change", path.display());
@@ -338,7 +338,7 @@ fn secret(action: SecretAction) -> Result<(), String> {
                 // A warning, not an error: the variable may be about to be
                 // added to accounts.toml. Silence would let it sit unread.
                 eprintln!(
-                    "gitfriend: warning: account {account} does not declare {var}; \
+                    "gitwho: warning: account {account} does not declare {var}; \
                      nothing will read it until accounts.toml lists it"
                 );
             }
@@ -418,7 +418,7 @@ fn secret(action: SecretAction) -> Result<(), String> {
 fn secret_init() -> Result<(), String> {
     let configured = match Config::load(&config_path()?) {
         Ok(config) => config.defaults.secret_backend,
-        Err(gitfriend::config::ConfigError::Read { source, .. })
+        Err(gitwho::config::ConfigError::Read { source, .. })
             if source.kind() == std::io::ErrorKind::NotFound =>
         {
             None
@@ -467,7 +467,7 @@ fn read_value(account: &str, var: &str) -> Result<String, String> {
         return Ok(value);
     }
 
-    gitfriend::secrets::read_value_from(&mut std::io::stdin()).map_err(|e| e.to_string())
+    gitwho::secrets::read_value_from(&mut std::io::stdin()).map_err(|e| e.to_string())
 }
 
 fn shim(action: ShimAction) -> Result<(), String> {
@@ -475,7 +475,7 @@ fn shim(action: ShimAction) -> Result<(), String> {
         ShimAction::Install { dir, names } => {
             let path_var = std::env::var("PATH").unwrap_or_default();
             for name in &names {
-                let written = gitfriend::shim::install(name, &dir, &path_var)
+                let written = gitwho::shim::install(name, &dir, &path_var)
                     .map_err(|e| e.to_string())?;
                 println!("{}", written.display());
             }
@@ -504,7 +504,7 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
             let resolved = resolve_repo(&config, &cwd).map_err(|e| e.to_string())?;
             if resolved.reason == Reason::Unmatched {
                 eprintln!(
-                    "gitfriend: no account claims this repository's remote; using {}",
+                    "gitwho: no account claims this repository's remote; using {}",
                     resolved.account.name
                 );
             }
@@ -548,16 +548,16 @@ fn credential(operation: &str) -> ExitCode {
             Err(message) => {
                 // Loud, and stdout stays empty so git cannot mistake a failure
                 // for a credential (R8).
-                eprintln!("gitfriend: {message}");
+                eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
             }
         },
-        // Deliberately no-ops. gitfriend's own store is the source of truth;
+        // Deliberately no-ops. gitwho's own store is the source of truth;
         // letting git cache a copy elsewhere would put the same token in a
         // second place with different access rules (R11).
         "store" | "erase" => ExitCode::SUCCESS,
         other => {
-            eprintln!("gitfriend: unknown credential operation {other:?}");
+            eprintln!("gitwho: unknown credential operation {other:?}");
             ExitCode::FAILURE
         }
     }
@@ -598,7 +598,7 @@ fn path_from_env(var: &str, default_file: &str) -> Result<PathBuf, String> {
     Ok(store_dir()?.join(default_file))
 }
 
-/// gitfriend's own directory, resolved once per process.
+/// gitwho's own directory, resolved once per process.
 ///
 /// Once, because three files are asked for on every invocation and the answer
 /// cannot change inside one -- and because this sits on the credential hot path
@@ -607,9 +607,9 @@ fn store_dir() -> Result<&'static PathBuf, String> {
     static DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
     DIR.get_or_init(|| {
-        gitfriend::paths::config_dir(
-            &gitfriend::paths::from_process,
-            gitfriend::paths::Layout::HOST,
+        gitwho::paths::config_dir(
+            &gitwho::paths::from_process,
+            gitwho::paths::Layout::HOST,
         )
         .map_err(|e| e.to_string())
     })
@@ -620,9 +620,9 @@ fn store_dir() -> Result<&'static PathBuf, String> {
 /// The environment as UTF-8 pairs, skipping anything that is not.
 ///
 /// `std::env::vars` panics on a single non-Unicode entry *anywhere* in the
-/// environment, and gitfriend inherits whatever git or a shell happened to have
+/// environment, and gitwho inherits whatever git or a shell happened to have
 /// -- so one stray variable would take out the credential helper before it read
-/// a byte of the request. Nothing gitfriend looks for here, a managed variable
+/// a byte of the request. Nothing gitwho looks for here, a managed variable
 /// name or a token value, can be non-Unicode and still be usable, so skipping
 /// loses nothing that was ever going to be found.
 fn unicode_env() -> impl Iterator<Item = (String, String)> {
@@ -656,13 +656,13 @@ fn choose_backend(configured: Option<&str>) -> Result<Choice, String> {
 }
 
 fn config_path() -> Result<PathBuf, String> {
-    path_from_env("GITFRIEND_CONFIG", "accounts.toml")
+    path_from_env("GITWHO_CONFIG", "accounts.toml")
 }
 
 fn secrets_path() -> Result<PathBuf, String> {
-    path_from_env("GITFRIEND_SECRETS", "secrets.age")
+    path_from_env("GITWHO_SECRETS", "secrets.age")
 }
 
 fn identity_path() -> Result<PathBuf, String> {
-    path_from_env("GITFRIEND_IDENTITY", "identity.key")
+    path_from_env("GITWHO_IDENTITY", "identity.key")
 }

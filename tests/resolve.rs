@@ -1,5 +1,5 @@
-use gitfriend::config::Config;
-use gitfriend::resolve::{resolve_url, Reason};
+use gitwho::config::Config;
+use gitwho::resolve::{resolve_url, Reason};
 
 /// Mirrors the real shape: two accounts on the same host, distinguished only
 /// by org (R3).

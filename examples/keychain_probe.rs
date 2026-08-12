@@ -19,11 +19,11 @@
 //!     cargo run --example keychain_probe -- read
 //!     cargo run --example keychain_probe -- clean
 
-use gitfriend::secrets::{fingerprint, Backend, KeychainBackend};
+use gitwho::secrets::{fingerprint, Backend, KeychainBackend};
 
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_default();
-    let backend = KeychainBackend::with_service("gitfriend-selftest");
+    let backend = KeychainBackend::with_service("gitwho-selftest");
     let (account, var) = ("RebuildProbe", "GH_TOKEN");
 
     match mode.as_str() {

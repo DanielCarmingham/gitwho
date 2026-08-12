@@ -25,12 +25,12 @@
 
 use std::path::Path;
 
-/// The variable that overrides everything else, matching the `GITFRIEND_*`
+/// The variable that overrides everything else, matching the `GITWHO_*`
 /// convention the paths already use.
 ///
 /// An environment variable rather than a flag: the credential helper is
 /// launched by git, so a flag would never reach the path that matters.
-pub const ENV_VAR: &str = "GITFRIEND_SECRET_BACKEND";
+pub const ENV_VAR: &str = "GITWHO_SECRET_BACKEND";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
@@ -38,7 +38,7 @@ pub enum BackendKind {
     Keychain,
 }
 
-/// What may be written in `GITFRIEND_SECRET_BACKEND` or `secretBackend`.
+/// What may be written in `GITWHO_SECRET_BACKEND` or `secretBackend`.
 ///
 /// Kept beside [`BackendKind::parse`] so an added backend cannot be accepted
 /// without also appearing in the error that lists them.
@@ -82,7 +82,7 @@ pub enum Source {
 impl Source {
     pub fn describe(self) -> &'static str {
         match self {
-            Source::Environment => "by GITFRIEND_SECRET_BACKEND",
+            Source::Environment => "by GITWHO_SECRET_BACKEND",
             Source::Config => "by [defaults] secretBackend in accounts.toml",
             Source::Default => "by default",
         }
@@ -190,7 +190,7 @@ pub fn choose(
     Ok(Choice { kind, source })
 }
 
-/// A value someone actually wrote. `GITFRIEND_SECRET_BACKEND=` is how a shell
+/// A value someone actually wrote. `GITWHO_SECRET_BACKEND=` is how a shell
 /// clears a variable, not a request for a backend named `""`.
 fn stated(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|v| !v.is_empty())

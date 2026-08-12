@@ -2,7 +2,7 @@ use super::{Backend, SecretError};
 
 /// The service name every entry is filed under. One service, many entries --
 /// the entry's "account" field carries `<Account>/<VAR>`.
-const DEFAULT_SERVICE: &str = "gitfriend";
+const DEFAULT_SERVICE: &str = "gitwho";
 
 /// Stores values in whatever credential store the platform provides.
 ///

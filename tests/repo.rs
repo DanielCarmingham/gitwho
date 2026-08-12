@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use gitfriend::config::Config;
-use gitfriend::resolve::{resolve_repo, Reason};
+use gitwho::config::Config;
+use gitwho::resolve::{resolve_repo, Reason};
 
 const TWO_GITHUB_ACCOUNTS: &str = r#"
     [defaults]
@@ -167,7 +167,7 @@ fn a_fork_resolves_to_its_origin_not_its_upstream() {
 fn a_remote_matching_no_account_falls_back_to_the_default_as_unmatched() {
     // ~12 third-party clones live under this machine's personal root
     // (microsoft, dotnet, charmbracelet...). Erroring in them would make
-    // `gitfriend exec` fail inside any repo you merely cloned to read.
+    // `gitwho exec` fail inside any repo you merely cloned to read.
     // Falling back is fine; falling back *silently* is not, so it carries its
     // own reason rather than posing as the ordinary default.
     let dir = tempfile::tempdir().unwrap();

@@ -1,4 +1,4 @@
-use gitfriend::mcp;
+use gitwho::mcp;
 
 /// The shape of the real file in `Digilope/one-drop-visuals`: a provider MCP
 /// with no `env` block at all, so it inherits whatever the shell had.
@@ -20,13 +20,13 @@ const REAL_SHAPE: &str = r#"{
 
 #[test]
 fn wraps_a_provider_server_so_it_launches_through_exec() {
-    let (rewritten, changed) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitfriend").unwrap();
+    let (rewritten, changed) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitwho").unwrap();
 
     assert_eq!(changed, vec!["gitea".to_string()]);
 
     let parsed: serde_json::Value = serde_json::from_str(&rewritten).unwrap();
     let gitea = &parsed["mcpServers"]["gitea"];
-    assert_eq!(gitea["command"], "/usr/local/bin/gitfriend");
+    assert_eq!(gitea["command"], "/usr/local/bin/gitwho");
     assert_eq!(
         gitea["args"],
         serde_json::json!([
@@ -40,7 +40,7 @@ fn wraps_a_provider_server_so_it_launches_through_exec() {
 
 #[test]
 fn leaves_servers_that_touch_no_provider_alone() {
-    let (rewritten, _) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitfriend").unwrap();
+    let (rewritten, _) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitwho").unwrap();
 
     let parsed: serde_json::Value = serde_json::from_str(&rewritten).unwrap();
     let other = &parsed["mcpServers"]["sequential-thinking"];
@@ -54,10 +54,10 @@ fn leaves_servers_that_touch_no_provider_alone() {
 #[test]
 fn wrapping_twice_does_not_double_wrap() {
     // `mcp sync` will be run again whenever a server is added. A second pass
-    // must be a no-op, or the command grows a new `gitfriend exec --` prefix
+    // must be a no-op, or the command grows a new `gitwho exec --` prefix
     // every time.
-    let (once, _) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitfriend").unwrap();
-    let (twice, changed) = mcp::wrap(&once, "/usr/local/bin/gitfriend").unwrap();
+    let (once, _) = mcp::wrap(REAL_SHAPE, "/usr/local/bin/gitwho").unwrap();
+    let (twice, changed) = mcp::wrap(&once, "/usr/local/bin/gitwho").unwrap();
 
     assert!(changed.is_empty(), "second pass reported changes: {changed:?}");
     assert_eq!(once, twice, "second pass altered the file");
@@ -75,7 +75,7 @@ fn unrelated_keys_and_their_order_survive() {
   }
 }"#;
 
-    let (rewritten, _) = mcp::wrap(input, "/usr/local/bin/gitfriend").unwrap();
+    let (rewritten, _) = mcp::wrap(input, "/usr/local/bin/gitwho").unwrap();
 
     let order: Vec<&str> = rewritten
         .lines()
@@ -101,7 +101,7 @@ fn a_server_with_no_provider_marker_is_not_touched() {
   }
 }"#;
 
-    let (_, changed) = mcp::wrap(input, "/usr/local/bin/gitfriend").unwrap();
+    let (_, changed) = mcp::wrap(input, "/usr/local/bin/gitwho").unwrap();
 
     assert!(changed.is_empty(), "a non-provider server was wrapped: {changed:?}");
 }

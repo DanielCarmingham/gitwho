@@ -5,18 +5,18 @@
 //! script's *content* is checkable and its behaviour is not. Said out loud so
 //! nothing below reads as proof that a Windows shim runs.
 
-use gitfriend::shim::{find_real_binary, shim_file_name, shim_script, ShimTarget};
+use gitwho::shim::{find_real_binary, shim_file_name, shim_script, ShimTarget};
 
 #[test]
 fn a_posix_shim_is_still_a_sh_script() {
     // A characterisation guard, not a driver: this pins today's output through
     // the ShimTarget refactor so the platform that is actually in use cannot
     // change shape unnoticed.
-    let script = shim_script("gh", "/usr/local/bin/gitfriend", "/opt/bin/gh", ShimTarget::Posix);
+    let script = shim_script("gh", "/usr/local/bin/gitwho", "/opt/bin/gh", ShimTarget::Posix);
 
     assert_eq!(shim_file_name("gh", ShimTarget::Posix), "gh");
     assert!(script.starts_with("#!/bin/sh\n"), "got:\n{script}");
-    assert!(script.contains("exec '/usr/local/bin/gitfriend' exec -- '/opt/bin/gh' \"$@\""));
+    assert!(script.contains("exec '/usr/local/bin/gitwho' exec -- '/opt/bin/gh' \"$@\""));
 }
 
 /// `PATHEXT` resolves `gh.exe` or `gh.cmd` and never an extensionless file, so
@@ -25,7 +25,7 @@ fn a_posix_shim_is_still_a_sh_script() {
 fn a_windows_shim_is_a_cmd_file_that_forwards_its_arguments() {
     let script = shim_script(
         "gh",
-        r"C:\Users\d\bin\gitfriend.exe",
+        r"C:\Users\d\bin\gitwho.exe",
         r"C:\Program Files\GitHub CLI\gh.exe",
         ShimTarget::Windows,
     );
@@ -41,7 +41,7 @@ fn a_windows_shim_is_a_cmd_file_that_forwards_its_arguments() {
         "every line should be CRLF-terminated; got:\n{script:?}"
     );
     assert!(
-        script.contains(r#""C:\Users\d\bin\gitfriend.exe" exec -- "C:\Program Files\GitHub CLI\gh.exe" %*"#),
+        script.contains(r#""C:\Users\d\bin\gitwho.exe" exec -- "C:\Program Files\GitHub CLI\gh.exe" %*"#),
         "the wrapped call should quote both paths and forward every argument; got:\n{script}"
     );
 }
@@ -50,7 +50,7 @@ fn a_windows_shim_is_a_cmd_file_that_forwards_its_arguments() {
 /// a failing `gh` would look like success to whatever ran the shim.
 #[test]
 fn a_windows_shim_passes_the_exit_code_back_out() {
-    let script = shim_script("gh", "gitfriend.exe", "gh.exe", ShimTarget::Windows);
+    let script = shim_script("gh", "gitwho.exe", "gh.exe", ShimTarget::Windows);
 
     assert!(
         script.trim_end().ends_with("exit /b %ERRORLEVEL%"),
@@ -64,7 +64,7 @@ fn a_windows_shim_passes_the_exit_code_back_out() {
 /// one.)
 #[test]
 fn a_percent_in_a_path_is_escaped_for_cmd() {
-    let script = shim_script("gh", r"C:\bin\gitfriend.exe", r"C:\100%\gh.exe", ShimTarget::Windows);
+    let script = shim_script("gh", r"C:\bin\gitwho.exe", r"C:\100%\gh.exe", ShimTarget::Windows);
 
     assert!(
         script.contains(r"C:\100%%\gh.exe"),

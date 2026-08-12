@@ -1,8 +1,8 @@
-//! Where gitfriend keeps its own files.
+//! Where gitwho keeps its own files.
 //!
 //! Split out of `main.rs` so the answer can be tested against an injected
 //! environment. The bug this replaces defaulted a missing `HOME` to an empty
-//! path, which made every location *relative* -- gitfriend would read
+//! path, which made every location *relative* -- gitwho would read
 //! `accounts.toml` out of whatever directory it was invoked from. A config
 //! anyone can drop into a working tree decides which host is handed which
 //! token, so that is a redirect vector, not just a porting gap (R8).
@@ -13,9 +13,9 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum PathError {
     #[error(
-        "none of {} is set, so there is no home directory to put gitfriend's files \
-         under; set one, or point GITFRIEND_CONFIG, GITFRIEND_SECRETS and \
-         GITFRIEND_IDENTITY at explicit paths",
+        "none of {} is set, so there is no home directory to put gitwho's files \
+         under; set one, or point GITWHO_CONFIG, GITWHO_SECRETS and \
+         GITWHO_IDENTITY at explicit paths",
         .consulted.join(", ")
     )]
     NoHome {
@@ -53,7 +53,7 @@ impl Layout {
 ///
 /// A function rather than a map of the whole environment, because building one
 /// means decoding every variable in it: `std::env::vars` panics on a single
-/// non-Unicode entry, and gitfriend runs inside whatever environment git or a
+/// non-Unicode entry, and gitwho runs inside whatever environment git or a
 /// shell happened to have. Only the names below are ever read.
 pub type Lookup<'a> = dyn Fn(&str) -> Option<OsString> + 'a;
 
@@ -62,7 +62,7 @@ pub fn from_process(var: &str) -> Option<OsString> {
     std::env::var_os(var)
 }
 
-/// gitfriend's own directory, derived from the environment it is handed.
+/// gitwho's own directory, derived from the environment it is handed.
 ///
 /// Values are taken in a stated order -- `APPDATA` (Windows layout only), then
 /// `HOME`, then `USERPROFILE` -- rather than guessed from the platform, so a
@@ -73,7 +73,7 @@ pub fn config_dir(env: &Lookup<'_>, layout: Layout) -> Result<PathBuf, PathError
     // platform. Unverified: there is no Windows machine to measure on.
     if layout == Layout::Windows {
         if let Some(appdata) = present(env, "APPDATA") {
-            return Ok(PathBuf::from(appdata).join("gitfriend"));
+            return Ok(PathBuf::from(appdata).join("gitwho"));
         }
     }
 
@@ -83,7 +83,7 @@ pub fn config_dir(env: &Lookup<'_>, layout: Layout) -> Result<PathBuf, PathError
             consulted: consulted(layout),
         })?;
 
-    Ok(PathBuf::from(home).join(".config").join("gitfriend"))
+    Ok(PathBuf::from(home).join(".config").join("gitwho"))
 }
 
 /// What this layout would have read, in the order it would have read it.

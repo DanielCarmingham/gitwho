@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use gitfriend::config::Config;
-use gitfriend::credential::{respond, Request};
-use gitfriend::secrets::EnvBackend;
+use gitwho::config::Config;
+use gitwho::credential::{respond, Request};
+use gitwho::secrets::EnvBackend;
 
 const ACCOUNTS: &str = r#"
     [defaults]

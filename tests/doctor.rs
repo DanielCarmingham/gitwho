@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use gitfriend::config::Config;
-use gitfriend::doctor::{self, GitWiring, Level, Store};
-use gitfriend::secrets::{BackendKind, Choice, Source};
-use gitfriend::secrets::{Backend, EnvBackend};
+use gitwho::config::Config;
+use gitwho::doctor::{self, GitWiring, Level, Store};
+use gitwho::secrets::{BackendKind, Choice, Source};
+use gitwho::secrets::{Backend, EnvBackend};
 use tempfile::TempDir;
 
 const ACCOUNTS: &str = r#"
@@ -37,8 +37,8 @@ fn stocked_backend() -> EnvBackend {
 
 fn healthy_wiring() -> GitWiring {
     GitWiring {
-        credential_helpers: vec!["gitfriend credential".to_string()],
-        github_helper: Some("gitfriend credential".to_string()),
+        credential_helpers: vec!["gitwho credential".to_string()],
+        github_helper: Some("gitwho credential".to_string()),
         use_http_path: Some(true),
     }
 }
@@ -184,8 +184,8 @@ fn github_without_use_http_path_is_a_problem() {
     // account resolves identically -- the failure would be silent and total.
     let config = Config::parse(ACCOUNTS).unwrap();
     let wiring = GitWiring {
-        credential_helpers: vec!["gitfriend credential".to_string()],
-        github_helper: Some("gitfriend credential".to_string()),
+        credential_helpers: vec!["gitwho credential".to_string()],
+        github_helper: Some("gitwho credential".to_string()),
         use_http_path: Some(false),
     };
 
@@ -199,7 +199,7 @@ fn github_without_use_http_path_is_a_problem() {
 }
 
 #[test]
-fn a_credential_helper_that_is_not_gitfriend_is_a_problem() {
+fn a_credential_helper_that_is_not_gitwho_is_a_problem() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let wiring = GitWiring {
         credential_helpers: vec!["manager".to_string()],
@@ -320,13 +320,13 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
 }
 
 #[test]
-fn a_url_scoped_helper_bypassing_gitfriend_is_a_problem() {
+fn a_url_scoped_helper_bypassing_gitwho_is_a_problem() {
     // This machine's actual state: the global helper could be perfect, but
     // `[credential "https://github.com"]` overrides it outright, so github.com
     // is served by `gh auth git-credential` instead.
     let config = Config::parse(ACCOUNTS).unwrap();
     let wiring = GitWiring {
-        credential_helpers: vec!["gitfriend credential".to_string()],
+        credential_helpers: vec!["gitwho credential".to_string()],
         github_helper: Some("!/opt/homebrew/bin/gh auth git-credential".to_string()),
         use_http_path: Some(true),
     };
@@ -455,7 +455,7 @@ fn a_group_or_world_readable_accounts_toml_is_a_problem() {
     );
 }
 
-/// `doctor` reports and `sync` fixes -- but nothing in gitfriend fixes a mode,
+/// `doctor` reports and `sync` fixes -- but nothing in gitwho fixes a mode,
 /// and `accounts.toml` arrives by hand from the example. A finding that names
 /// the stake without the remedy is one the operator learns to read past, which
 /// is how the redirect vector this check exists for would later go unnoticed.
@@ -635,13 +635,13 @@ fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
         .expect("doctor should say which store is in effect");
     assert!(
         reported.message.contains("keychain")
-            && reported.message.contains("GITFRIEND_SECRET_BACKEND"),
+            && reported.message.contains("GITWHO_SECRET_BACKEND"),
         "the store and what chose it should both be named; got: {}",
         reported.message
     );
 }
 
-/// Where owner-only permissions cannot be applied -- Windows, where gitfriend
+/// Where owner-only permissions cannot be applied -- Windows, where gitwho
 /// writes no ACLs -- the no-op has to be visible. Reporting the gap is the
 /// honest alternative to shipping ACL code nobody here can run.
 #[test]
