@@ -2,11 +2,14 @@
 
 Setting up gitwho on a machine that has never run it.
 
-This is the *install* guide. [CUTOVER.md](CUTOVER.md) is a different document:
-it is the runbook for migrating one specific machine off an existing
-path-based dotfiles setup, and it is full of that machine's paths, hostnames
-and undo steps. Read it if you are dismantling something; read this if you are
-starting from nothing.
+If you are migrating off an existing path-based setup rather than starting from
+nothing, do it in this order: get gitwho working alongside what you have (its
+`[include]` line placed *after* your existing `includeIf "gitdir:"` rules, so
+later-wins hands control over while both are present), verify with the checks
+below, and only then remove the old rules. Every step here is reversible by
+deleting one line.
+
+Why it is written this way is in [DESIGN.md](DESIGN.md).
 
 ## What you need
 
@@ -79,9 +82,10 @@ The `chmod` is not hygiene, it is the point: `accounts.toml` is a redirect
 vector. Whoever can write it can add a `match` pattern for a host they control
 and be handed one of your tokens.
 
-The example file is a real working config for its author's four accounts, not
-a template of placeholders — replace the accounts, emails, orgs and hosts with
-yours. The shape that matters:
+The example declares three archetypes — a personal account, a work account
+distinguished by organisation rather than by host, and a self-hosted Gitea
+using ssh and https at once. Replace every value; keep whichever shapes match
+how you actually work. The shape that matters:
 
 ```toml
 [defaults]
@@ -101,7 +105,7 @@ env           = ["GH_TOKEN"]                  # what `exec` injects
 
 `match` is what does the real work — it is matched against `host/path`, so
 `github.com/SomeOrg/**` selects an account by *organisation*, which is why
-three GitHub accounts on one host can be told apart. `paths` is only a
+several GitHub accounts on one host can be told apart. `paths` is only a
 fallback for repositories with no remote. Neither `env` nor `gitCredential`
 ever holds a value; they name variables.
 

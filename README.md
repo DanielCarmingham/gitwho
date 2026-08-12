@@ -32,8 +32,37 @@ Identity should follow the **repository**, not its location:
   scrub every other account's variables first, so nothing sits in the ambient
   environment for an unrelated process to pick up.
 
-See [REQUIREMENTS.md](REQUIREMENTS.md) for the full requirements, the evidence
-behind them (all measured, not assumed), and the open questions.
+One file declares your accounts. Nothing else needs editing when you add one.
+
+```toml
+[[accounts]]
+name          = "Work"
+email         = "you@example-corp.com"
+gitCredential = "GH_TOKEN"          # names the variable; the value is in the store
+match         = ["github.com/example-corp/**"]
+env           = ["GH_TOKEN"]        # what `exec` injects
+```
+
+`match` runs against `host/path`, which is why several GitHub accounts on one
+host can be told apart — by organisation, with no directory layout implied.
+
+## Install
+
+Needs a Rust toolchain and git ≥ 2.36 (for `includeIf
+"hasconfig:remote.*.url:"`).
+
+```sh
+git clone https://github.com/DanielCarmingham/gitwho
+cd gitwho
+cargo install --path . --locked
+```
+
+The binary alone does nothing — the account rules, the secret store and the git
+wiring are all setup. **[docs/INSTALL.md](docs/INSTALL.md)** walks through it
+with a verification at each step, plus what a second machine can and cannot
+restore from your dotfiles.
+
+## Commands
 
 ```
 gitwho doctor        report whether the wiring is coherent (read-only)
@@ -45,39 +74,35 @@ gitwho secret …      store tokens; only fingerprints are ever printed
 gitwho mcp sync      route provider MCP servers through exec
 ```
 
-## Install
-
-There are no prebuilt binaries; build it. Needs a Rust toolchain and git ≥ 2.36
-(for `includeIf "hasconfig:remote.*.url:"`).
-
-```sh
-cargo install --path . --locked
-```
-
-The binary alone does nothing — the account rules, the store and the git wiring
-are all setup. **[docs/INSTALL.md](docs/INSTALL.md)** walks through it, with a
-verification at each step, plus what a second machine can and cannot restore
-from your dotfiles.
+`doctor` is the one to run first and after any change. It is read-only, exits
+non-zero on problems, and never prints a secret value.
 
 ## Status
 
-**In use** on the author's machine since 2026-08-10: git identity, git
-credentials, the `gh`/`tea` shims and one wrapped MCP server all route through
-it. direnv no longer exports a token per directory. 117 tests, clippy clean.
+In use on the author's machine since 2026-08-10: git identity, git credentials,
+the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
+no longer exports a token per directory. 118 tests, clippy clean.
 
-One gap remains there: `~/.zshrc.local` still exports the old `GH_TOKEN_*`
-values, so interactive shells carry a copy nothing reads. `doctor` reports it
-as an `[ambient]` warning.
+One gap remains there, and `doctor` reports it rather than hiding it: a shell
+rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that
+nothing reads. That `[ambient]` warning *is* the exposure this tool exists to
+remove — it is left visible on purpose.
 
-Verified on macOS only. The Linux path is plausible and untried; the Windows
-paths and `.cmd` shim are unit-tested from macOS and **have never run on
-Windows** — see CLAUDE.md.
+**Platform reality**, stated precisely because the gap between these rows is
+easy to paper over:
 
-[docs/CUTOVER.md](docs/CUTOVER.md) is the migration runbook for that machine —
-step by step, with a check and an undo for each. It is a record of dismantling
-one particular setup, not an install guide.
+| | |
+|---|---|
+| macOS | verified — everything below has actually been run |
+| Linux | plausible, untried. The default secret store is an age-encrypted file, not the Keychain, and the shims are plain `#!/bin/sh` |
+| Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 
-Design and the measurements behind it:
-[docs/superpowers/specs/2026-08-09-gitwho-design.md](docs/superpowers/specs/2026-08-09-gitwho-design.md).
-Requirements: [REQUIREMENTS.md](REQUIREMENTS.md) — note its claim that Digilope
-needs no token in the push/pull path is wrong; that host serves https too.
+## Reading
+
+- **[docs/INSTALL.md](docs/INSTALL.md)** — setting it up, step by step, with a
+  check after each one and the traps that produce false passes.
+- **[docs/DESIGN.md](docs/DESIGN.md)** — why it is shaped this way: the
+  measured evidence, the resolution algorithm, the threat model it does and
+  does not cover, and the R1–R15 principles the source refers to by number.
+- **[docs/accounts.toml.example](docs/accounts.toml.example)** — a commented
+  starting config.

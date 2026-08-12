@@ -260,8 +260,8 @@ fn an_unknown_configured_backend_is_refused() {
     );
 }
 
-/// The existing machine keeps tokens as `GH_TOKEN_<Account>` exports in
-/// `~/.zshrc.local`. Import copies them rather than requiring a re-issue.
+/// The setup this replaces keeps tokens as `GH_TOKEN_<Account>` exports in a
+/// shell rc file. Import copies them rather than requiring a re-issue.
 #[test]
 fn import_from_the_environment_preserves_the_value() {
     let dir = tempfile::tempdir().unwrap();

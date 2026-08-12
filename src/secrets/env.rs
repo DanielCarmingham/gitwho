@@ -4,10 +4,10 @@ use super::{Backend, SecretError};
 
 /// Reads `<VAR>_<Account>` from a set of environment variables.
 ///
-/// This is the scheme `~/.zshrc.local` already uses, so it is what makes
-/// migrating an existing machine a copy rather than a token re-issue. It is a
-/// migration and CI path, not the default: values held this way are readable
-/// by every process in the shell.
+/// This is the scheme a shell rc file full of `GH_TOKEN_<Account>` exports
+/// already uses, so it makes migrating an existing machine a copy rather than
+/// a token re-issue. It is a migration and CI path, not the default: values
+/// held this way are readable by every process in the shell.
 pub struct EnvBackend {
     vars: HashMap<String, String>,
 }
