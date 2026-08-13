@@ -150,8 +150,15 @@ re-run `dist generate`. `ci.yml` is hand-written and is not generated.
    cargo fmt --check
    dist plan                 # four targets, shell installer, homebrew formula
    dist generate --check     # fails if release.yml has drifted from the config
+   dist build --artifacts=local --target=aarch64-apple-darwin
    cargo publish --dry-run
    ```
+
+   That fourth line is not optional, and 0.1.0 is why. `dist plan` never
+   compiles, and `--artifacts=global` builds only the installer, formula and
+   checksums — so a missing `[profile.dist]` in `Cargo.toml` passed every local
+   check and then failed every build job in CI. A local-artifact build is the
+   first thing that actually invokes the profile.
 3. `cargo publish` **first**. It is the irreversible channel — a version on
    crates.io cannot be replaced — and dist has no crates.io job.
 4. Tag `vX.Y.Z` on **exactly** the commit `cargo publish` ran from, then push
