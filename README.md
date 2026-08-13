@@ -53,6 +53,11 @@ macOS and Linux, on x86-64 and arm64. Every route puts a `gitwho` binary in
 `PATH`. You also need **git ≥ 2.36** — `includeIf "hasconfig:remote.*.url:"`
 landed there.
 
+> **Not released yet.** The release pipeline is configured and verified
+> (`dist plan`, `cargo publish --dry-run`) but no version has been cut, so only
+> the from-source route below works today. The other three go live with the
+> first tag.
+
 **Homebrew**
 
 ```sh
