@@ -150,6 +150,34 @@ gitconfig's `includeIf` rules, so in a colocated repo `jj` and `git` can commit
 as different people without saying so. Details, and what fixing it would take,
 are in [docs/DESIGN.md](docs/DESIGN.md#known-limits).
 
+## Security
+
+The property that matters is not the encryption — it is that **a token is
+fetched by the one process that needs it, at the moment it needs it**, instead
+of sitting in your environment where everything you launch inherits it. `exec`
+clears every managed variable before setting the resolved account's, so nothing
+ambient survives into the child.
+
+Around that: values live in an age-encrypted file unlocked by an identity key,
+both created `0600` inside a `0700` directory — and created at that mode rather
+than chmod'd afterwards, so there is no window where the file is complete and
+readable. Values never enter `argv` (`secret set` reads stdin, because `ps` is
+public), are never printed (only fingerprints), and never enter the repository
+(`accounts.toml` names variables). `doctor` fails outright if those permissions
+drift, and warns when a provider token is sitting in your environment — the
+exposure this exists to remove.
+
+**What it does not do:** the identity key sits next to the ciphertext, both
+owned by you, so anything running as your user can decrypt everything. The
+encryption defends the secrets at rest — a backup, a sync folder, an accidental
+commit — not against local code.
+
+The full threat model, including why the platform keychain is implemented but
+not the default, is in
+[docs/DESIGN.md](docs/DESIGN.md#what-this-protects-and-what-it-does-not).
+To report a vulnerability, see [SECURITY.md](SECURITY.md) — please use private
+reporting rather than a public issue.
+
 ## Reading
 
 - **[docs/INSTALL.md](docs/INSTALL.md)** — setting it up, step by step, with a
