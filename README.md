@@ -53,11 +53,6 @@ macOS and Linux, on x86-64 and arm64. Every route puts a `gitwho` binary in
 `PATH`. You also need **git ≥ 2.36** — `includeIf "hasconfig:remote.*.url:"`
 landed there.
 
-> **Not released yet.** The release pipeline is configured and verified
-> (`dist plan`, `cargo publish --dry-run`) but no version has been cut, so only
-> the from-source route below works today. The other three go live with the
-> first tag.
-
 **Homebrew**
 
 ```sh
@@ -146,7 +141,7 @@ easy to paper over:
 | | |
 |---|---|
 | macOS | verified — this is where it runs every day |
-| Linux | the whole suite and the full `gitwho init` flow run on Debian/aarch64: store modes, identity, the credential helper, a shim executed for real, and the `.bashrc` PATH line. Not yet exercised on x86-64, which CI covers |
+| Linux | the test suite passes on x86-64 in CI. On Debian/aarch64 the whole `init` flow has also been driven by hand: store modes, identity, the credential helper, a shim executed for real, and the `.bashrc` PATH line |
 | Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 
 ## Reading
