@@ -144,6 +144,12 @@ easy to paper over:
 | Linux | the test suite passes on x86-64 in CI. On Debian/aarch64 the whole `init` flow has also been driven by hand: store modes, identity, the credential helper, a shim executed for real, and the `.bashrc` PATH line |
 | Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 
+**What it does not cover yet.** `jj` takes its credentials from git, so pushing
+works — but it keeps author identity in its own config and does not read
+gitconfig's `includeIf` rules, so in a colocated repo `jj` and `git` can commit
+as different people without saying so. Details, and what fixing it would take,
+are in [docs/DESIGN.md](docs/DESIGN.md#known-limits).
+
 ## Reading
 
 - **[docs/INSTALL.md](docs/INSTALL.md)** — setting it up, step by step, with a

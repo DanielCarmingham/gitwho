@@ -332,6 +332,24 @@ the second is the one to act on.
 
 ## Known limits
 
+- **`jj` gets the credentials but not the identity.** Measured with jj 0.44.0.
+  Its remote operations go through git, so a push over https is served by the
+  credential helper like any other — that half works. But jj keeps author
+  identity in its own config and **does not read gitconfig's `includeIf` rules
+  at all**, so `user.email` comes from `~/.config/jj/config.toml` regardless of
+  what git resolves. In a colocated repo the two can therefore disagree, and
+  the disagreement is silent: `git config user.email` and `jj config get
+  user.email` return different addresses, and which one lands on a commit
+  depends on which binary you happened to use.
+
+  jj's own answer is `[[--scope]]` with `--when.repositories = [...]` — which
+  is **path-based and ordering-sensitive**, the exact shape this project exists
+  to replace. Mirroring the accounts there by hand works, and is what the author
+  currently does, but it is a second source of truth that drifts.
+
+  Covering it properly means generating that jj config from `accounts.toml` the
+  way `sync` generates the gitconfig. Nothing here does that yet.
+
 - **A GUI application launched outside a shell** — an editor started from the
   Dock — inherits no shim `PATH` and no environment. Git identity and git
   transport are still correct there, because both come from gitconfig. A CLI
