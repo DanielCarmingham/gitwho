@@ -59,8 +59,26 @@ Reports about them are welcome as ideas, but they are not undisclosed holes:
   sits on disk beside the encrypted secrets, both owned by you, so anything
   running as your user decrypts both. The encryption defends the secrets *at
   rest* — a backup, a sync folder, an accidental commit — and not against local
-  code. If something is executing as you, it has your tokens, with or without
-  gitwho.
+  code.
+
+  It is worth being blunt about how low that bar is, because "age-encrypted"
+  reads like a stronger claim than it is. Code running as you does not need to
+  find the key or touch the ciphertext at all; it can just ask:
+
+  ```sh
+  printf 'protocol=https\nhost=github.com\npath=Org/repo.git\n' | gitwho credential get
+  ```
+
+  and get `password=<the token>` back. gitwho is a decryption oracle for its own
+  store by construction — that is precisely how it answers git. This is no
+  harder than reading `GH_TOKEN` out of a `.bashrc`, or running `gh auth token`,
+  and gitwho is **not** an improvement on either against local code. Reports
+  demonstrating this are not vulnerabilities; it is the documented design.
+
+  What actually improves is *exposure over time*: a token lives in one process
+  for one invocation instead of in every process you launch for the whole
+  session. That narrows the window and the blast radius. It does not stop
+  anything running as you.
 - **A token is in the environment of the process gitwho launches.** That is how
   `gh` and `tea` read it, so during `gitwho exec` the value is visible in that
   child's environment to your own user. The gain is scope, not absence: one

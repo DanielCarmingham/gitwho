@@ -162,6 +162,19 @@ Anything running as you can read both and decrypt. So the age file defends the
 secrets **at rest** — a backup, a sync folder, an accidental commit — and not
 against a local process.
 
+And the bar is lower than even that suggests, because local code need not go
+near the key or the ciphertext. It can ask:
+
+```sh
+printf 'protocol=https\nhost=github.com\npath=Org/repo.git\n' | gitwho credential get
+```
+
+which returns `password=<token>`. The credential helper is a decryption oracle
+for its own store by construction — being one is the whole job. Extracting a
+token this way is no harder than reading `GH_TOKEN` from a `.bashrc` or running
+`gh auth token`, so **against code running as your user this design is not an
+improvement on the thing it replaced, and must not be described as one.**
+
 The cross-project exposure this tool exists to remove comes from somewhere
 else: **secrets are fetched on demand by the one process that needs them,
 instead of sitting in the ambient environment where every unrelated process

@@ -172,6 +172,16 @@ owned by you, so anything running as your user can decrypt everything. The
 encryption defends the secrets at rest — a backup, a sync folder, an accidental
 commit — not against local code.
 
+Be concrete about that, because "encrypted" invites the wrong conclusion.
+Anything running as you can pipe a request into `gitwho credential` and be
+handed the token in plain text. gitwho is a decryption oracle for its own
+store — it has to be, that is how it answers git. Getting a token out of it is
+no harder than reading `GH_TOKEN` out of your `.bashrc`, or running
+`gh auth token`. **Against local code running as you, this is not an
+improvement on either, and does not claim to be.** What changes is exposure
+over time: a token is present in one process for one invocation, instead of in
+every process for the whole session.
+
 The full threat model, including why the platform keychain is implemented but
 not the default, is in
 [docs/DESIGN.md](docs/DESIGN.md#what-this-protects-and-what-it-does-not).
