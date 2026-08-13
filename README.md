@@ -146,7 +146,7 @@ easy to paper over:
 | | |
 |---|---|
 | macOS | verified — this is where it runs every day |
-| Linux | plausible, untried. The default secret store is an age-encrypted file, not the Keychain, and the shims are plain `#!/bin/sh` |
+| Linux | the whole suite and the full `gitwho init` flow run on Debian/aarch64: store modes, identity, the credential helper, a shim executed for real, and the `.bashrc` PATH line. Not yet exercised on x86-64, which CI covers |
 | Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 
 ## Reading

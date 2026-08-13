@@ -19,9 +19,11 @@ Why it is built this way is in [DESIGN.md](DESIGN.md).
 | git ≥ 2.36 | `includeIf "hasconfig:remote.*.url:"` landed in 2.36 |
 | a POSIX shell | zsh and bash are what the shims are written for |
 
-**Platform reality.** Everything below has been run on macOS. Linux should
-work — the secret store is an age-encrypted file, not the Keychain, and the
-shims are plain `#!/bin/sh` — but no step here has been executed on Linux.
+**Platform reality.** Everything below has been run on macOS, and on Debian
+(aarch64) — including the store permissions, the credential helper, a shim
+executed for real, and the `PATH` line landing in `.bashrc` rather than
+`.zshrc`. x86-64 Linux is covered by CI but has not been driven by hand.
+
 Windows is *unverified in the strong sense*: the `%APPDATA%` path, the `.cmd`
 shim and the `PATHEXT` lookup are unit-tested as pure functions from macOS and
 have never run on Windows. Do not treat them as working.

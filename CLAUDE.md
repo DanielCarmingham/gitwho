@@ -15,9 +15,13 @@ each one rests on. [README.md](README.md) is the short version;
 resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
 and MCP wrapping all route real traffic. 139 tests, clippy clean.
 
-**Verified on macOS only.** Linux is plausible and untried: the default secret
-store is an age file rather than the Keychain, and the shims are plain
-`#!/bin/sh`.
+**macOS is where it runs daily. Linux is now exercised, not assumed:** the full
+suite (138 tests) plus the whole `init` flow — `0700`/`0600` modes, identity
+resolution, the credential helper, a shim executed with the shim dir first on
+`PATH`, and the `.bashrc` branch — pass on Debian bookworm/aarch64 under
+`rust:1.88`. Reproduce with `docker run --rm -v "$PWD:/src:ro" -w /work
+rust:1.88-bookworm`, copying the tree in rather than building in the mount.
+x86-64 Linux is still only covered by CI.
 
 **Windows is unverified in the strong sense.** `%APPDATA%\gitwho` in
 `src/paths.rs`, the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs`, and the

@@ -296,6 +296,25 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
         } else {
             step("would create", format!("{}", identity.display()));
         }
+
+        // After the key exists, so the directory is certain to be there. The
+        // install script writes its receipt into this same directory with a
+        // plain `mkdir -p`, so on a fresh machine it can already be 0755 --
+        // permissions gitwho never set, which `doctor` would then fail on.
+        if store.exists() {
+            match gitwho::init::ensure_owner_only(&store, write)
+                .map_err(|e| format!("cannot check {}: {e}", store.display()))?
+            {
+                gitwho::init::Mode::AlreadyOwnerOnly | gitwho::init::Mode::NotApplicable => {}
+                gitwho::init::Mode::Tightened => step(
+                    "tightened",
+                    format!("{} to 0700 (was group- or world-readable)", store.display()),
+                ),
+                gitwho::init::Mode::WouldTighten => {
+                    step("would fix", format!("{} is not 0700", store.display()))
+                }
+            }
+        }
     } else {
         step(
             "ok",

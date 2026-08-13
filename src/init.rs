@@ -117,6 +117,52 @@ pub fn ensure(path: &Path, snippet: &Snippet, write: bool) -> std::io::Result<Ap
     Ok(Applied::Appended)
 }
 
+/// What `ensure_owner_only` found, or would have done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    AlreadyOwnerOnly,
+    Tightened,
+    WouldTighten,
+    /// A platform that cannot express it. `doctor` reports the gap instead.
+    NotApplicable,
+}
+
+/// Close the store directory down to `0700`, even if something else created it.
+///
+/// `secrets::age_file` deliberately narrows only a directory *it* creates: it
+/// runs on every `secret set`, and chmodding a directory someone else owns
+/// would be a side effect nobody asked for. `init --write` is the opposite
+/// situation -- an explicit setup command, run deliberately, on gitwho's own
+/// directory, where `doctor` otherwise just prints `chmod 700` and waits.
+///
+/// This is not hypothetical. dist's shell installer writes its receipt to
+/// `${XDG_CONFIG_HOME:-~/.config}/gitwho/` -- the same directory -- with a
+/// plain `mkdir -p`, so the ubiquitous `022` umask leaves it `0755` *before
+/// gitwho has run at all*. Following the recommended install and then running
+/// `init` would fail `doctor` on permissions gitwho never set.
+pub fn ensure_owner_only(dir: &Path, write: bool) -> std::io::Result<Mode> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = std::fs::metadata(dir)?.permissions().mode() & 0o777;
+        if mode == 0o700 {
+            return Ok(Mode::AlreadyOwnerOnly);
+        }
+        if !write {
+            return Ok(Mode::WouldTighten);
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        Ok(Mode::Tightened)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, write);
+        Ok(Mode::NotApplicable)
+    }
+}
+
 /// The starting `accounts.toml`, shipped in the binary.
 ///
 /// The same bytes as `docs/accounts.toml.example`, so the test that parses that

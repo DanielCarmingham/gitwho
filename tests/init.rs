@@ -353,3 +353,63 @@ env = ["GH_TOKEN"]
         "the shell rc must be byte-identical after a second run"
     );
 }
+
+/// The dist shell installer writes its receipt to
+/// `${XDG_CONFIG_HOME:-~/.config}/gitwho/` -- gitwho's own store directory --
+/// with a plain `mkdir -p`, so a `022` umask leaves it `0755` before gitwho has
+/// ever run. Found by running the real installer in a Linux container: the
+/// documented install, followed by `init`, failed `doctor` on permissions
+/// gitwho never set.
+#[cfg(unix)]
+#[test]
+fn init_tightens_a_store_directory_someone_else_created() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = fresh_home();
+    let store = home.path().join(".config/gitwho");
+
+    // Exactly what the installer leaves behind.
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(store.join("gitwho-receipt.json"), "{}").unwrap();
+
+    let out = gitwho(home.path(), &["init", "--write"]);
+    let text = stdout(&out);
+
+    let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o700,
+        "init should have closed the store down; report was:\n{text}"
+    );
+    assert!(
+        text.contains("tightened"),
+        "and should have said so rather than fixing it silently; got:\n{text}"
+    );
+
+    // The receipt is not ours, and removing it would break `gitwho-update`.
+    assert!(
+        store.join("gitwho-receipt.json").exists(),
+        "init must not delete the installer's receipt"
+    );
+}
+
+/// A dry run reports the problem and changes nothing -- including permissions.
+#[cfg(unix)]
+#[test]
+fn a_dry_run_does_not_tighten_anything() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = fresh_home();
+    let store = home.path().join(".config/gitwho");
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = gitwho(home.path(), &["init"]);
+
+    assert_eq!(
+        std::fs::metadata(&store).unwrap().permissions().mode() & 0o777,
+        0o755,
+        "a dry run must not change permissions"
+    );
+    assert!(stdout(&out).contains("would fix"), "got:\n{}", stdout(&out));
+}
