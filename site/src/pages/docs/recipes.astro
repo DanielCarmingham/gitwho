@@ -1,0 +1,58 @@
+---
+// Hand-written, not a content-collection entry: the recipes are TypeScript
+// data (src/data/recipes.ts), not markdown, so this page builds its own
+// heading list for DocsLayout's table of contents instead of getting one from
+// remark. Each recipe's `id` doubles as its h2 anchor.
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+import { RECIPES } from '../../data/recipes';
+
+const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: recipe.title }));
+---
+
+<DocsLayout title="Recipes" headings={headings} current="recipes">
+  <div class="prose">
+    <p class="lede">
+      Four complete <code>accounts.toml</code> configurations, paste-ready. Each is checked at
+      build time against the same schema <a href="/docs/config">the annotated template</a> uses,
+      so a recipe here either parses and matches the tool's own example, or the site does not
+      ship.
+    </p>
+    <p>
+      Copy the config into <code>~/.config/gitwho/accounts.toml</code>, replace the placeholder
+      usernames, emails and hosts with your own, then run the <code>secret set</code> commands
+      for whichever tokens it names. Finish with <code>gitwho doctor</code> to confirm the wiring
+      is coherent.
+    </p>
+  </div>
+
+  {
+    RECIPES.map((recipe) => (
+      <section class="prose recipe">
+        <h2 id={recipe.id}>{recipe.title}</h2>
+        <p>{recipe.problem}</p>
+        <CodeBlock code={recipe.toml} lang="toml" />
+        {recipe.secrets.length > 0 && (
+          <>
+            <p class="label">secret setup</p>
+            <CodeBlock code={recipe.secrets.join('\n')} lang="sh" />
+          </>
+        )}
+      </section>
+    ))
+  }
+
+  <div class="prose">
+    <p>
+      Whichever recipe you started from, the last step is the same: run <code>gitwho doctor</code>.
+      It is read-only, exits non-zero on problems, and never prints a secret value — so its output
+      is always safe to paste when asking for help.
+    </p>
+  </div>
+</DocsLayout>
+
+<style>
+  .recipe {
+    margin-top: var(--s7);
+  }
+</style>
