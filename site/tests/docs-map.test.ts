@@ -7,17 +7,24 @@ describe('DOCS', () => {
     expect(DOCS.map((d) => d.slug).sort()).toEqual(['design', 'install', 'security']);
   });
 
-  it('points every entry at a file that exists in the submodule', () => {
+  it('points every entry at a file that exists at the repo root', () => {
     for (const doc of DOCS) {
       expect(() => readFileSync(`../${doc.file}`, 'utf8')).not.toThrow();
     }
   });
 
   it('maps a source basename to its site route', () => {
-    expect(routeFor('DESIGN.md')).toBe('/docs/design');
-    expect(routeFor('INSTALL.md')).toBe('/docs/install');
-    expect(routeFor('SECURITY.md')).toBe('/docs/security');
-    expect(routeFor('accounts.toml.example')).toBe('/docs/config');
+    expect(routeFor('DESIGN.md')).toBe('/docs/design/');
+    expect(routeFor('INSTALL.md')).toBe('/docs/install/');
+    expect(routeFor('SECURITY.md')).toBe('/docs/security/');
+    expect(routeFor('accounts.toml.example')).toBe('/docs/config/');
+  });
+
+  it('gives every route a trailing slash, matching trailingSlash: always', () => {
+    for (const doc of DOCS) {
+      expect(routeFor(doc.file.split('/').pop()!)).toMatch(/\/$/);
+    }
+    expect(routeFor('accounts.toml.example')).toMatch(/\/$/);
   });
 
   it('returns undefined for a basename it does not know', () => {

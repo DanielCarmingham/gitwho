@@ -28,10 +28,14 @@ export const DOCS: DocEntry[] = [
  * Keyed by basename because the same target is written differently depending
  * on which file links to it: INSTALL.md says `DESIGN.md`, the README says
  * `docs/DESIGN.md`. Both must resolve to one route.
+ *
+ * Routes carry a trailing slash, matching `trailingSlash: 'always'` in
+ * astro.config.ts. The build emits `<route>/index.html`, so a link without the
+ * slash is served only after a 301.
  */
 const ROUTES: Record<string, string> = {
-  ...Object.fromEntries(DOCS.map((d) => [d.file.split('/').pop()!, `/docs/${d.slug}`])),
-  'accounts.toml.example': '/docs/config',
+  ...Object.fromEntries(DOCS.map((d) => [d.file.split('/').pop()!, `/docs/${d.slug}/`])),
+  'accounts.toml.example': '/docs/config/',
 };
 
 /** The site route for a linked source file, or undefined if unknown. */

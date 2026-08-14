@@ -14,21 +14,21 @@ const run = (html: string) =>
 
 describe('rehypeRewriteLinks', () => {
   it('rewrites a path-qualified doc link', () => {
-    expect(run('<a href="docs/DESIGN.md">d</a>')).toContain('href="/docs/design"');
+    expect(run('<a href="docs/DESIGN.md">d</a>')).toContain('href="/docs/design/"');
   });
 
   it('rewrites a bare doc link the same way', () => {
-    expect(run('<a href="DESIGN.md">d</a>')).toContain('href="/docs/design"');
+    expect(run('<a href="DESIGN.md">d</a>')).toContain('href="/docs/design/"');
   });
 
   it('preserves the fragment', () => {
     expect(run('<a href="docs/DESIGN.md#known-limits">k</a>')).toContain(
-      'href="/docs/design#known-limits"',
+      'href="/docs/design/#known-limits"',
     );
   });
 
   it('routes the config example to its own page', () => {
-    expect(run('<a href="docs/accounts.toml.example">c</a>')).toContain('href="/docs/config"');
+    expect(run('<a href="docs/accounts.toml.example">c</a>')).toContain('href="/docs/config/"');
   });
 
   it('leaves fragment-only links alone', () => {

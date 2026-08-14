@@ -73,11 +73,11 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
       <span class="qs__n" aria-hidden="true">1</span>
       <div class="qs__body prose">
         <h3>Install the binary</h3>
-        <CodeBlock code={brew} lang="sh" />
+        <CodeBlock code={brew} lang="sh" label="the Homebrew install command" />
         <p class="label">or, with no package manager</p>
-        <CodeBlock code={curl} lang="sh" />
+        <CodeBlock code={curl} lang="sh" label="the standalone installer command" />
         <p class="label">or, with a rust toolchain</p>
-        <CodeBlock code={cargo} lang="sh" />
+        <CodeBlock code={cargo} lang="sh" label="the cargo install command" />
         <p>
           macOS and Linux, on x86-64 and arm64. Every route puts a <code>gitwho</code> binary in
           <code>~/.cargo/bin</code>, so that directory needs to be on your <code>PATH</code>. You
@@ -99,11 +99,11 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
           One command, run twice, with your accounts written in between. The first is a dry run: it
           lists every step it would take and writes nothing.
         </p>
-        <CodeBlock code={init} lang="sh" />
+        <CodeBlock code={init} lang="sh" label="the two init commands" />
         <p>
           The second creates the store, scaffolds an empty <code>accounts.toml</code>, and halts:
         </p>
-        <CodeBlock code={stop} />
+        <CodeBlock code={stop} label="what init --write prints when it stops" />
         <p class="note">
           It stops on purpose. Generating rules from a template of placeholders would give you a
           machine that looks configured and resolves every repository to an account that does not
@@ -122,14 +122,14 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
           holds their values, which is what lets it live in a dotfiles repo. A complete two-account
           config:
         </p>
-        <CodeBlock code={worked.toml} lang="toml" />
+        <CodeBlock code={worked.toml} lang="toml" label="the worked accounts.toml" />
         <p>
           <code>match</code> runs against <code>host/path</code>, which is why two GitHub accounts
           on one host can be told apart — by organisation, with no directory layout implied.
         </p>
         <p>
-          Not your shape? <a href="/docs/recipes">Recipes</a> has three more complete configs, and
-          <a href="/docs/config">the annotated template</a> explains every field.
+          Not your shape? <a href="/docs/recipes/">Recipes</a> has three more complete configs, and
+          <a href="/docs/config/">the annotated template</a> explains every field.
         </p>
       </div>
     </li>
@@ -138,7 +138,7 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
       <span class="qs__n" aria-hidden="true">4</span>
       <div class="qs__body prose">
         <h3>Store the tokens, then finish</h3>
-        <CodeBlock code={finish} lang="sh" />
+        <CodeBlock code={finish} lang="sh" label="the secret set and init commands" />
         <p>
           <code>secret set</code> reads the value from stdin, so it never enters <code>argv</code>,
           because <code>ps</code> is public. Stored values are printed back only as fingerprints.
@@ -147,7 +147,7 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
           If <code>gh</code> is already logged in as that account you can skip storing a token
           altogether — <code>env = [&#123; var = "GH_TOKEN", from = "gh", user = "..." &#125;]</code>
           reads it from <code>gh</code> on demand, so there is no copy to keep in sync.
-          <a href="/docs/install">Installing gitwho</a> covers when that is worth doing.
+          <a href="/docs/install/">Installing gitwho</a> covers when that is worth doing.
         </p>
         <p>
           <code>init</code> is idempotent. Re-run it whenever you add an account; every step reports
@@ -160,7 +160,7 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
 
   <div class="qs__close prose">
     <p>Then, after any change:</p>
-    <CodeBlock code="gitwho doctor" lang="sh" />
+    <CodeBlock code="gitwho doctor" lang="sh" label="the doctor command" />
     <p>
       A healthy run prints <code>ok</code> for every check and exits zero — the store's permissions
       are intact, every token the config names is present, and git's credential helper actually

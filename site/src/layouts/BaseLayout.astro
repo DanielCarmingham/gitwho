@@ -7,7 +7,17 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
-const canonical = new URL(Astro.url.pathname, 'https://gitwho.cc').href;
+
+// Derived from `site` in astro.config.ts rather than hard-coded, so the
+// canonical host is stated once. `site` is required for a static build here;
+// without it there is no honest canonical URL to emit, so fail loudly.
+if (!Astro.site) {
+  throw new Error(
+    'Astro.site is unset, so no canonical URL can be built. ' +
+      'Set `site` in astro.config.ts to the canonical origin (https://www.gitwho.cc).',
+  );
+}
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const repo = 'https://github.com/DanielCarmingham/gitwho';
 ---
 
@@ -19,8 +29,15 @@ const repo = 'https://github.com/DanielCarmingham/gitwho';
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    {/*
+      The .ico is declared first and the SVG second, which is the order that
+      gets a modern browser to choose the SVG and leaves the .ico for everything
+      else — including the bare /favicon.ico a browser requests without asking
+      the document. It is a real three-image icon (16/32/48), so the `sizes`
+      list is the truth rather than the usual "32x32" placeholder.
+    */}
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -53,7 +70,7 @@ const repo = 'https://github.com/DanielCarmingham/gitwho';
       <div class="shell chrome__row">
         <a class="wordmark" href="/">gitwho</a>
         <nav class="chrome__nav" aria-label="Site">
-          <a href="/docs/install">docs</a>
+          <a href="/docs/install/">docs</a>
           <a href={repo}>github</a>
           <button type="button" class="theme" data-theme-toggle>
             <span class="sr-only">Theme:</span>
