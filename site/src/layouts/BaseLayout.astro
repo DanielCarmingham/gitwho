@@ -1,0 +1,104 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, 'https://gitwho.cc').href;
+const repo = 'https://github.com/DanielCarmingham/gitwho';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta name="generator" content={Astro.generator} />
+    {/*
+      Runs before first paint, so the stored choice is applied without a flash
+      of the wrong theme. Deliberately inline and unbundled: a module script is
+      deferred, which is exactly the flash this avoids.
+    */}
+    <script is:inline>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add('js');
+        try {
+          var stored = localStorage.getItem('gitwho-theme');
+          if (stored === 'light' || stored === 'dark') {
+            root.setAttribute('data-theme', stored);
+          }
+        } catch (err) {
+          /* Storage blocked. The system preference still applies. */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#content">skip to content</a>
+
+    <header class="chrome chrome--top">
+      <div class="shell chrome__row">
+        <a class="wordmark" href="/">gitwho</a>
+        <nav class="chrome__nav" aria-label="Site">
+          <a href="/docs/install">docs</a>
+          <a href={repo}>github</a>
+          <button type="button" class="theme" data-theme-toggle>
+            <span class="sr-only">Theme:</span>
+            <span class="theme__state" data-state="auto" aria-live="polite">auto</span>
+            <span class="theme__state" data-state="light" aria-live="polite">light</span>
+            <span class="theme__state" data-state="dark" aria-live="polite">dark</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main id="content" class="shell main">
+      <slot />
+    </main>
+
+    <footer class="chrome chrome--bottom">
+      <div class="shell chrome__row">
+        <span>MIT licence</span>
+        <a href={repo}>github.com/DanielCarmingham/gitwho</a>
+      </div>
+    </footer>
+
+    <script>
+      // One of two scripts on this site. It cycles the three theme states and
+      // persists an explicit choice; "auto" is stored as the absence of a key.
+      const KEY = 'gitwho-theme';
+      const ORDER = ['auto', 'light', 'dark'] as const;
+      const root = document.documentElement;
+
+      document.querySelector('[data-theme-toggle]')?.addEventListener('click', () => {
+        const current = root.dataset.theme ?? 'auto';
+        const next = ORDER[(ORDER.indexOf(current as (typeof ORDER)[number]) + 1) % ORDER.length];
+
+        try {
+          if (next === 'auto') {
+            delete root.dataset.theme;
+            localStorage.removeItem(KEY);
+          } else {
+            root.dataset.theme = next;
+            localStorage.setItem(KEY, next);
+          }
+        } catch (err) {
+          // Storage blocked: the choice still applies for this page view.
+        }
+      });
+    </script>
+  </body>
+</html>

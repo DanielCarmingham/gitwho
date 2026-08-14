@@ -1,0 +1,33 @@
+---
+import { getCollection, render } from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { DOCS, assertSourcesPresent } from '../../docs-map';
+
+export async function getStaticPaths() {
+  assertSourcesPresent();
+
+  const entries = await getCollection('docs');
+  if (entries.length !== DOCS.length) {
+    throw new Error(
+      `Expected ${DOCS.length} docs entries, found ${entries.length}. ` +
+        `Is vendor/gitwho initialized? Run: git submodule update --init --recursive`,
+    );
+  }
+
+  return DOCS.map((doc) => {
+    // generateId in src/content.config.ts is `({ entry }) => entry`, so the
+    // collection id is exactly the raw relative path (e.g. `docs/INSTALL.md`)
+    // — no hedging against an extension-stripped form.
+    const entry = entries.find((e) => e.id === doc.file);
+    if (!entry) throw new Error(`No collection entry for ${doc.file}`);
+    return { params: { slug: doc.slug }, props: { doc, entry } };
+  });
+}
+
+const { doc, entry } = Astro.props;
+const { Content, headings } = await render(entry);
+---
+
+<DocsLayout title={doc.title} headings={headings} current={doc.slug}>
+  <Content />
+</DocsLayout>

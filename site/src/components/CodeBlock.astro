@@ -1,0 +1,135 @@
+---
+import { Code } from 'astro:components';
+
+interface Props {
+  /** The exact text of the snippet. Also what the copy button writes. */
+  code: string;
+  /** A Shiki language id. Omitted means plain text. */
+  lang?: string;
+}
+
+const { code, lang } = Astro.props;
+
+// Trailing whitespace would render as a blank final line and be copied along
+// with the snippet.
+const source = code.replace(/\s+$/, '');
+---
+
+<figure class="code">
+  <div class="code__bar">
+    {lang && <span class="code__lang">{lang}</span>}
+    <button type="button" class="code__copy" data-copy={source}>copy</button>
+  </div>
+  <Code
+    code={source}
+    lang={lang as any}
+    themes={{ light: 'vitesse-light', dark: 'vitesse-dark' }}
+    defaultColor={false}
+  />
+  <span class="sr-only" role="status" aria-live="polite" data-copy-status></span>
+</figure>
+
+<style>
+  .code {
+    margin: 0;
+    background: var(--surface);
+    border: var(--hair) solid var(--border);
+    border-radius: var(--radius);
+    /* The bar's hairline stops at the rounded corners. */
+    overflow: hidden;
+  }
+
+  .code__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s4);
+    padding: var(--s2) var(--s3) var(--s2) var(--s4);
+    border-bottom: var(--hair) solid var(--border);
+  }
+
+  .code__lang {
+    font-family: var(--font-mono);
+    font-size: var(--t-xs);
+    letter-spacing: var(--tracking-label);
+    color: var(--text-dim);
+  }
+
+  /* Same idiom as the theme control: a small mono word that renames itself. */
+  .code__copy {
+    /* Holds the row's right edge whether or not a language is named. */
+    margin-inline-start: auto;
+    min-width: 7ch;
+    padding: 0.15em 0.5em;
+    font-family: var(--font-mono);
+    font-size: var(--t-xs);
+    color: var(--text-dim);
+    text-align: center;
+    background: none;
+    border: var(--hair) solid transparent;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .code__copy:hover {
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  .code__copy[data-copied] {
+    color: var(--ok);
+  }
+
+  .code :global(pre) {
+    /* The figure already draws the surface and the border. */
+    margin: 0;
+    padding-block: var(--s3);
+    background: none;
+    border: 0;
+    border-radius: 0;
+  }
+</style>
+
+<script>
+  // The second and last script on this site. One delegated listener serves
+  // every code block on the page.
+  const REVERT_MS = 2000;
+  const timers = new WeakMap<HTMLElement, number>();
+
+  document.addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest<HTMLElement>('[data-copy]');
+    if (!button) return;
+
+    const status = button
+      .closest('figure')
+      ?.querySelector<HTMLElement>('[data-copy-status]');
+    let label = 'copy failed';
+    let announcement = 'Copy failed. Select the snippet and copy it manually.';
+
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy ?? '');
+      label = 'copied';
+      announcement = 'Copied to clipboard.';
+      button.dataset.copied = '';
+    } catch (err) {
+      delete button.dataset.copied;
+    }
+
+    button.textContent = label;
+    if (status) status.textContent = announcement;
+
+    clearTimeout(timers.get(button));
+    timers.set(
+      button,
+      window.setTimeout(() => {
+        button.textContent = 'copy';
+        delete button.dataset.copied;
+        if (status) status.textContent = '';
+      }, REVERT_MS),
+    );
+  });
+</script>

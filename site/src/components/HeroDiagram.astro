@@ -1,0 +1,262 @@
+---
+/*
+ * Where path-based rules break.
+ *
+ * Two panels, one repository, three locations. The argument is carried by the
+ * shape as much as by the words: the left panel fans three locations out into
+ * two different identities, the right funnels the same three into one.
+ *
+ * The left panel is deliberately colourless. No --warn, no --ok, no glyph, no
+ * heavier rule on the rows that are wrong — because git says nothing either.
+ * Every row there is drawn identically; the only thing that differs is the
+ * identity string itself. If the left panel looked like a failure state it
+ * would be arguing the opposite of the point.
+ *
+ * Two SVGs rather than one, because each panel needs its own viewBox: viewBox
+ * cannot be changed from CSS, so a single asset could not both sit in a half
+ * column at 1440px and fill a phone without the text scaling to one extreme or
+ * the other. One SVG per panel, reflowed by grid, keeps the type at a sane
+ * size at every width. Both share a viewBox so the two render identically.
+ */
+
+// Arrowheads are drawn as paths rather than <marker>, so there are no ids to
+// collide with and no reliance on context-fill.
+const headRight = (x: number, y: number) =>
+  `M${x} ${y - 2.9} L${x + 5.6} ${y} L${x} ${y + 2.9} Z`;
+const headDown = (x: number, y: number) =>
+  `M${x - 2.9} ${y} L${x} ${y + 5.6} L${x + 2.9} ${y} Z`;
+
+/** Path baselines. The descriptor under each sits 12 lower; the connector 2. */
+const ROWS = [62, 100, 138];
+
+const LOCATIONS = [
+  { path: '~/work/repo', kind: 'a normal clone' },
+  { path: '/tmp/wt-3', kind: "a worktree in a tool's root" },
+  { path: '~/Downloads/repo', kind: 'a clone made elsewhere' },
+];
+
+const GITDIR = [
+  { identity: 'dev@acme.example', note: 'rule matched' },
+  { identity: 'you@personal.dev', note: 'no rule matched · default' },
+  { identity: 'you@personal.dev', note: 'no rule matched · default' },
+];
+---
+
+<figure class="hero">
+  <div class="hero__panels">
+    <!-- ------------------------------------------------- panel: gitdir -- -->
+    <svg
+      class="hero__panel"
+      viewBox="0 0 300 210"
+      role="img"
+      aria-labelledby="hero-gitdir-title hero-gitdir-desc"
+    >
+      <title id="hero-gitdir-title">Where a path-based rule stops matching</title>
+      <desc id="hero-gitdir-desc">
+        The same repository in three places. An includeIf gitdir rule matches only the first,
+        ~/work/repo, and applies the acme identity, dev@acme.example. In the worktree at /tmp/wt-3
+        and in a second clone at ~/Downloads/repo no rule matches, so git falls back to the default
+        personal identity, you@personal.dev. Git reports nothing in either case: no error, no
+        warning, no non-zero exit. The commit is simply signed by the wrong person.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="300" y2="2"></line>
+      <text class="stamp" x="0" y="22">includeIf &quot;gitdir:&quot;</text>
+      <text class="sans dim" x="0" y="36">identity keyed to where the repo sits</text>
+
+      {
+        ROWS.map((y, i) => (
+          <>
+            <text class="mono" x="0" y={y}>
+              {LOCATIONS[i].path}
+            </text>
+            <text class="sans dim" x="0" y={y + 12}>
+              {LOCATIONS[i].kind}
+            </text>
+            <line class="wire" x1="134" y1={y + 2} x2="154" y2={y + 2} />
+            <path class="wire-head" d={headRight(154, y + 2)} />
+            <text class="mono" x="166" y={y}>
+              {GITDIR[i].identity}
+            </text>
+            <text class="sans dim" x="166" y={y + 12}>
+              {GITDIR[i].note}
+            </text>
+          </>
+        ))
+      }
+
+      <line class="rule" x1="0" y1="176" x2="300" y2="176"></line>
+      <text class="sans dim" x="0" y="190">Nothing errors. Nothing warns. Nothing exits non-zero.</text>
+      <text class="sans dim" x="0" y="203">The commit is simply signed by the wrong person.</text>
+    </svg>
+
+    <!-- ------------------------------------------------- panel: gitwho -- -->
+    <svg
+      class="hero__panel"
+      viewBox="0 0 300 210"
+      role="img"
+      aria-labelledby="hero-gitwho-title hero-gitwho-desc"
+    >
+      <title id="hero-gitwho-title">How gitwho resolves the same three cases</title>
+      <desc id="hero-gitwho-desc">
+        The same three locations. gitwho reads the repository's remote, github.com/acme/repo, which
+        is identical in all three, and resolves one account from it: dev@acme.example. The worktree,
+        the relocated clone and the temp directory all get the correct identity, because the path on
+        disk is never consulted.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="300" y2="2"></line>
+      <text class="stamp" x="0" y="22">gitwho</text>
+      <text class="sans dim" x="0" y="36">identity keyed to the repository&apos;s remote</text>
+
+      {
+        ROWS.map((y, i) => (
+          <>
+            <text class="mono" x="0" y={y}>
+              {LOCATIONS[i].path}
+            </text>
+            <text class="sans dim" x="0" y={y + 12}>
+              {LOCATIONS[i].kind}
+            </text>
+            <line class="wire" x1="134" y1={y + 2} x2="148" y2={y + 2} />
+          </>
+        ))
+      }
+
+      {/* The three locations merge into one stem: the shape of the argument. */}
+      <line class="wire" x1="148" y1="64" x2="148" y2="140"></line>
+      <line class="wire" x1="148" y1="102" x2="154" y2="102"></line>
+      <path class="wire-head" d={headRight(154, 102)}></path>
+
+      <text class="mono key" x="166" y="100">github.com/acme/repo</text>
+      <text class="sans dim" x="166" y="112">reported by all three</text>
+
+      <line class="wire" x1="172" y1="118" x2="172" y2="130"></line>
+      <path class="wire-head" d={headDown(172, 130)}></path>
+
+      <text class="mono result" x="166" y="148">dev@acme.example</text>
+      <text class="sans dim" x="166" y="160">one account, everywhere</text>
+
+      <line class="rule" x1="0" y1="176" x2="300" y2="176"></line>
+      <text class="sans dim" x="0" y="190">Correct in a worktree, a relocated clone, or a temp</text>
+      <text class="sans dim" x="0" y="203">directory. The path on disk is never consulted.</text>
+    </svg>
+  </div>
+</figure>
+
+<style>
+  .hero {
+    margin: 0;
+    /* Bounds the scale-up: a viewBox stretched across the full page would set
+       the diagram's type larger than the page's own headings. */
+    width: 100%;
+    max-width: 56rem;
+    /* Left-aligned, not centred: the shell's left edge is the axis every other
+       block on this site sits on, and a centred diagram breaks it. */
+    margin-inline: 0;
+  }
+
+  .hero__panels {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--s6);
+    justify-items: center;
+  }
+
+  .hero__panel {
+    width: 100%;
+    /* Stacked, a panel spanning the whole page would scale its 12-unit type to
+       about 40px. Capped, it lands near 15px and matches the two-up size. */
+    max-width: 24rem;
+    height: auto;
+    /* Grid tracks must be free to size from the fr values, not from the SVG's
+       intrinsic width. */
+    min-width: 0;
+  }
+
+  /*
+   * 45rem, not 40: below roughly 720px the two-up panels render 12-unit mono
+   * under 12px, which is the floor this diagram is legible at.
+   */
+  @media (min-width: 45rem) {
+    .hero__panels {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--s7);
+    }
+
+    .hero__panel {
+      max-width: none;
+    }
+  }
+
+  /* ----------------------------------------------------------- ink -- */
+
+  .rule,
+  .wire {
+    fill: none;
+    stroke-width: 1;
+    /* Hairlines stay one device pixel at every scale, matching --hair. */
+    vector-effect: non-scaling-stroke;
+  }
+
+  .rule {
+    stroke: var(--border);
+    shape-rendering: crispEdges;
+  }
+
+  .wire {
+    stroke: var(--text-dim);
+  }
+
+  .wire-head {
+    fill: var(--text-dim);
+  }
+
+  /* --------------------------------------------------------- type -- */
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    fill: var(--text);
+  }
+
+  .sans {
+    font-family: var(--font-sans);
+    /* 10, not 10.5: measured, the longest label in either diagram clears its
+       column by 11% at this size and by 3% at 10.5, and 3% is not enough slack
+       for a wider fallback face on another platform. Renders ~10px at the 360px
+       floor and ~13-14px at 1440px. */
+    font-size: 10px;
+    fill: var(--text);
+  }
+
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: var(--w-medium);
+    letter-spacing: var(--tracking-label);
+    fill: var(--text);
+  }
+
+  .dim {
+    fill: var(--text-dim);
+  }
+
+  /*
+   * The key gitwho reads. Set smaller than the identity it produces — it is the
+   * input, not the answer — but at full ink, because it is the whole claim:
+   * this string is the same in all three locations.
+   */
+  .key {
+    font-size: 10px;
+  }
+
+  /*
+   * The only colour in either panel, and it is on the right. The left panel
+   * gets none: an accent on its one correct row would make the other two read
+   * as flagged, which is exactly the impression this diagram must not give.
+   */
+  .result {
+    fill: var(--accent);
+  }
+</style>

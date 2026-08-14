@@ -1,0 +1,36 @@
+---
+// Not a content-collection entry: accounts.toml.example is TOML, not
+// markdown, so it never passes through src/content.config.ts. It is read from
+// the repo root at build time and rendered as a highlighted reference. A
+// missing file must fail the build, not render an empty page — readFileSync
+// throws on its own, and that throw is the guard.
+//
+// This is the same file `init::TEMPLATE` include_str!s into the binary, so the
+// page and the tool cannot disagree about what a starting config looks like.
+import { readFileSync } from 'node:fs';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+
+const source = readFileSync('../docs/accounts.toml.example', 'utf8');
+---
+
+<DocsLayout title="Config" headings={[]} current="config">
+  <div class="prose">
+    <p class="lede">
+      This is the one file you write by hand: <code>~/.config/gitwho/accounts.toml</code>, the
+      accounts gitwho resolves against.
+    </p>
+    <p>
+      Two fields are easy to misread. <code>gitCredential</code> and <code>env</code> name
+      environment variables — they do not hold values. The values live in an encrypted secret
+      store, populated separately with <code>gitwho secret set</code>. That split is deliberate:
+      it is what lets <code>accounts.toml</code> itself be committed to a dotfiles repo, since
+      there is nothing secret in it to leak.
+    </p>
+    <p>
+      For complete worked examples across providers, see <a href="/docs/recipes">recipes</a>.
+      What follows is the annotated template gitwho ships, with every field explained inline.
+    </p>
+    <CodeBlock code={source} lang="toml" />
+  </div>
+</DocsLayout>

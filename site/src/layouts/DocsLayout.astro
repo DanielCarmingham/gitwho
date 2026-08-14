@@ -1,0 +1,146 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { DOCS } from '../docs-map';
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  title: string;
+  headings: Heading[];
+  current: string;
+}
+
+const { title, headings, current } = Astro.props;
+
+// The reading pane's own headings, not the document title. h1s inside content
+// are already stripped by remark-strip-title, so depth starts at 2 in
+// practice; depth 4 is excluded to keep the list a map, not a mirror.
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<BaseLayout title={`${title} — gitwho docs`} description={`gitwho documentation: ${title}.`}>
+  <div class="docs">
+    <nav class="docs__nav" aria-label="Documentation">
+      <ul>
+        {
+          DOCS.map((doc) => (
+            <li>
+              <a href={`/docs/${doc.slug}`} aria-current={doc.slug === current ? 'page' : undefined}>
+                {doc.nav}
+              </a>
+            </li>
+          ))
+        }
+        {
+          // Hand-written page, not part of DOCS: config.astro reads TOML
+          // straight from the submodule rather than going through the
+          // content collection, so it can't be mapped alongside the
+          // markdown docs without breaking assertSourcesPresent's guard.
+        }
+        <li>
+          <a href="/docs/config" aria-current={current === 'config' ? 'page' : undefined}>
+            Config
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="docs__content prose">
+      <h1>{title}</h1>
+      <slot />
+    </div>
+
+    {
+      toc.length > 0 && (
+        <nav class="docs__toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ul>
+            {toc.map((h) => (
+              <li class:list={['docs__toc-item', `docs__toc-item--${h.depth}`]}>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )
+    }
+  </div>
+</BaseLayout>
+
+<style>
+  .docs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s7);
+  }
+
+  .docs__nav,
+  .docs__toc {
+    font-family: var(--font-mono);
+    font-size: var(--t-sm);
+  }
+
+  .docs__nav ul,
+  .docs__toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .docs__nav li + li,
+  .docs__toc li + li {
+    margin-top: var(--s2);
+  }
+
+  .docs__nav a,
+  .docs__toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+
+  .docs__nav a:hover,
+  .docs__toc a:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
+  .docs__nav a[aria-current='page'] {
+    color: var(--accent);
+    font-weight: var(--w-medium);
+  }
+
+  .docs__toc-item--3 {
+    padding-inline-start: var(--s4);
+  }
+
+  .docs__toc .label {
+    margin-bottom: var(--s3);
+  }
+
+  /* Content can be wider than --measure would suggest inside a narrow grid
+     track, so let the track govern width and keep the reading measure as an
+     upper bound rather than a fixed one. */
+  .docs__content {
+    max-width: var(--measure);
+  }
+
+  /* Three columns once there is room for a fixed sidebar, a full measure and
+     a fixed TOC without either being crushed. Below that, one column: nav,
+     then content, then TOC — document order already gives this stacking. */
+  @media (min-width: 64rem) {
+    .docs {
+      grid-template-columns: 11rem minmax(0, var(--measure)) 11rem;
+      align-items: start;
+    }
+
+    .docs__nav,
+    .docs__toc {
+      position: sticky;
+      top: var(--s6);
+    }
+  }
+</style>

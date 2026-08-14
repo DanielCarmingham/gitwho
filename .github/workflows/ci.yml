@@ -2,10 +2,15 @@
 # be edited here.
 name: CI
 
+# `site/` holds the gitwho.cc website and shares this repo so the docs it
+# publishes cannot drift from the tool. It has no bearing on the crate, so a
+# CSS change should not spend a four-OS Rust matrix.
 on:
   push:
     branches: [main]
+    paths-ignore: ['site/**']
   pull_request:
+    paths-ignore: ['site/**']
 
 env:
   CARGO_TERM_COLOR: always

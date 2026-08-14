@@ -1,0 +1,102 @@
+/*
+ * Design tokens.
+ *
+ * Three theme states, not two: an explicit choice stamps data-theme="dark" or
+ * data-theme="light" on <html>; the default "system" state stamps nothing and
+ * follows prefers-color-scheme. So the complete light palette is defined on
+ * bare :root, the dark overrides appear twice — once under the media query
+ * (guarded so an explicit light choice still wins) and once under the explicit
+ * dark attribute — and no colour is ever defined only inside a media query.
+ */
+
+:root {
+  --bg: #fdfdfc;
+  --surface: #f4f4f2;
+  --text: #1a1a18;
+  --text-dim: #5c5c56;
+  --border: #dededa;
+  --accent: #b4532a;
+  --accent-dim: #f0e2db;
+  --ok: #2f6b3f;
+  --warn: #8a6116;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --measure: 34rem;
+  --page: 68rem;
+
+  /* Scrollbars, form controls and the canvas behind the page follow the theme. */
+  color-scheme: light;
+
+  /*
+   * Type scale. The faces are system stacks, so the personality has to come
+   * from size, weight and tracking rather than from a display face. A restrained
+   * major-third ramp: this is documentation, not a poster.
+   */
+  --t-xs: 0.75rem;
+  --t-sm: 0.8125rem;
+  --t-md: 0.875rem;
+  --t-base: 1rem;
+  --t-lg: 1.0625rem;
+  --t-xl: 1.375rem;
+  --t-2xl: clamp(1.75rem, 1.35rem + 1.8vw, 2.25rem);
+
+  /* system-ui at 700 shouts. 600 is the heaviest weight this site uses. */
+  --w-normal: 400;
+  --w-medium: 500;
+  --w-semi: 600;
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-body: 1.65;
+
+  --tracking-tight: -0.014em;
+  --tracking-label: 0.06em;
+
+  /* Spacing, in a 4px-derived ramp. */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+  --s8: 4.5rem;
+
+  --gutter: clamp(1.25rem, 4vw, 2.5rem);
+
+  /* Not zero, not a pill. Software has edges; they are just not sharp. */
+  --radius: 3px;
+  --hair: 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #16161a;
+    --surface: #1e1e23;
+    --text: #e8e8e4;
+    --text-dim: #9a9a94;
+    --border: #303038;
+    --accent: #e8834f;
+    --accent-dim: #33231b;
+    --ok: #6fbf85;
+    --warn: #d9a441;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #16161a;
+  --surface: #1e1e23;
+  --text: #e8e8e4;
+  --text-dim: #9a9a94;
+  --border: #303038;
+  --accent: #e8834f;
+  --accent-dim: #33231b;
+  --ok: #6fbf85;
+  --warn: #d9a441;
+
+  color-scheme: dark;
+}

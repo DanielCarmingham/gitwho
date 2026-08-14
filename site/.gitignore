@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.astro/
+.superpowers/
+# Design docs and implementation plans. Local working state, like .dex — they
+# carry deployment specifics that have no business in a public repo.
+docs/superpowers/

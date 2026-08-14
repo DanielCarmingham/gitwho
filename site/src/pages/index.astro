@@ -1,0 +1,55 @@
+---
+// Placeholder body. Task 7 replaces this page with the real landing page; what
+// is here exercises the shell: prose in the reading column, and a code block
+// with each of the three language cases the later pages use.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import HeroDiagram from '../components/HeroDiagram.astro';
+import FlowDiagram from '../components/FlowDiagram.astro';
+
+const config = `[accounts.work]
+email = "you@example.com"
+name = "Your Name"
+remotes = ["github.com/acme"]`;
+
+const install = `brew install DanielCarmingham/tap/gitwho
+gitwho init`;
+
+const output = `resolved  github.com/acme/api
+account   work
+email     you@example.com`;
+---
+
+<BaseLayout
+  title="gitwho — the right git identity, per repository"
+  description="gitwho picks the git identity and credentials for a repository from its remote URL, not from where it happens to sit on disk."
+>
+  <div class="prose">
+    <h1>The right identity, wherever the repository sits.</h1>
+    <p class="lede">
+      gitwho resolves your git identity and credentials from a repository's remote URL rather than
+      its path on disk, so a clone in the wrong directory still commits as the right person.
+    </p>
+    <p>
+      Accounts are declared once, in one file. Each one lists the remotes it owns.
+    </p>
+    <CodeBlock code={config} lang="toml" />
+  </div>
+
+  <div style="margin-block: var(--s8); display: grid; gap: var(--s8);">
+    <HeroDiagram />
+    <FlowDiagram />
+  </div>
+
+  <div class="prose">
+    <h2>Install</h2>
+    <p>Two commands. The second writes the git config include rules.</p>
+    <CodeBlock code={install} lang="sh" />
+    <h2>Check what it resolved</h2>
+    <p>
+      Resolution is meant to be inspectable: <code>gitwho which</code> prints the account it would
+      use for the current repository, and why.
+    </p>
+    <CodeBlock code={output} />
+  </div>
+</BaseLayout>

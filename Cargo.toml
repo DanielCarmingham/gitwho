@@ -23,6 +23,11 @@ exclude = [
     ".claude/",
     ".dex/",
     "dist-workspace.toml",
+    # The gitwho.cc website. Excluded wholesale rather than by pattern: it
+    # carries node_modules, a build output and its own specs, none of which
+    # belong in a crate tarball. Note this also covers `site/docs/superpowers/`,
+    # which `docs/*.md` above would not have matched.
+    "site/",
 ]
 
 # Without this, `cargo binstall` falls back to a full source build: every one of

@@ -1,0 +1,326 @@
+---
+/*
+ * How a credential reaches exactly one process.
+ *
+ * Four stages left to right, each its own SVG so each can carry its own
+ * viewBox: viewBox cannot be set from CSS, so a single wide asset would either
+ * be unreadable on a phone or oversized on a desktop. The grid's fr values are
+ * the stages' viewBox widths, which makes every stage resolve to the same
+ * scale — the type is one size across the whole diagram at every width. In the
+ * stacked layout each stage takes a width proportional to its viewBox for the
+ * same reason.
+ *
+ * The payload is the last stage. One variable set, the rest visibly cleared:
+ * a token in one process for one invocation, rather than in every process for
+ * the whole session.
+ */
+
+const headRight = (x: number, y: number) =>
+  `M${x} ${y - 2.9} L${x + 5.6} ${y} L${x} ${y + 2.9} Z`;
+
+/** Mono advance is close enough to 0.6em to place a strike-through by hand. */
+const strike = (chars: number, size = 12) => 4 + 6 + chars * size * 0.6 + 2;
+
+const ACCOUNTS = [
+  { name: 'acme', pattern: 'github.com/acme/**', matched: true },
+  { name: 'personal', pattern: 'github.com/you/**', matched: false },
+  { name: 'gitea', pattern: 'git.example.net/**', matched: false },
+];
+
+const ENV = [
+  { name: 'GH_TOKEN', state: 'set', kept: true },
+  { name: 'GITEA_TOKEN', state: 'cleared', kept: false },
+  { name: 'GITLAB_TOKEN', state: 'cleared', kept: false },
+];
+
+const ROWS3 = [48, 70, 92];
+---
+
+<figure class="flow">
+  <div class="flow__row">
+    <!-- ------------------------------------------------ stage: callers -- -->
+    <svg
+      class="flow__stage"
+      style="--w: 135"
+      viewBox="0 0 135 142"
+      role="img"
+      aria-labelledby="flow-callers-title flow-callers-desc"
+    >
+      <title id="flow-callers-title">The callers</title>
+      <desc id="flow-callers-desc">
+        Four things need credentials for the same repository: git itself, the gh CLI, tea, and an
+        MCP server.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="135" y2="2"></line>
+      <text class="stamp" x="0" y="20">callers</text>
+
+      <text class="mono" x="6" y="46">git</text>
+      <text class="mono" x="6" y="64">gh</text>
+      <text class="mono" x="6" y="82">tea</text>
+      <text class="mono" x="6" y="100">mcp server</text>
+
+      <line class="rule" x1="0" y1="108" x2="135" y2="108"></line>
+      <text class="sans dim" x="0" y="122">all four need credentials</text>
+    </svg>
+
+    <svg class="flow__arrow" viewBox="0 0 24 12" aria-hidden="true">
+      <line class="wire" x1="1" y1="6" x2="16" y2="6"></line>
+      <path class="wire-head" d={headRight(16, 6)}></path>
+    </svg>
+
+    <!-- ------------------------------------------------- stage: gitwho -- -->
+    <svg
+      class="flow__stage"
+      style="--w: 155"
+      viewBox="0 0 155 142"
+      role="img"
+      aria-labelledby="flow-gitwho-title flow-gitwho-desc"
+    >
+      <title id="flow-gitwho-title">What gitwho resolves from</title>
+      <desc id="flow-gitwho-desc">
+        gitwho resolves from the repository's remote rather than its path on disk, reducing it to
+        host and path — github.com/acme/repo — and it does this on every invocation rather than once
+        per shell.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="155" y2="2"></line>
+      <text class="stamp" x="0" y="20">gitwho</text>
+
+      <text class="sans dim" x="0" y="46">the repository&apos;s remote,</text>
+      <text class="sans dim" x="0" y="58">not its path on disk</text>
+      <text class="mono" x="0" y="80">github.com/acme/repo</text>
+      <text class="sans dim" x="0" y="94">the key it matches on</text>
+
+      <line class="rule" x1="0" y1="108" x2="155" y2="108"></line>
+      <text class="sans dim" x="0" y="122">re-resolved per invocation</text>
+    </svg>
+
+    <svg class="flow__arrow" viewBox="0 0 24 12" aria-hidden="true">
+      <line class="wire" x1="1" y1="6" x2="16" y2="6"></line>
+      <path class="wire-head" d={headRight(16, 6)}></path>
+    </svg>
+
+    <!-- ------------------------------------------- stage: accounts.toml -- -->
+    <svg
+      class="flow__stage"
+      style="--w: 215"
+      viewBox="0 0 215 142"
+      role="img"
+      aria-labelledby="flow-accounts-title flow-accounts-desc"
+    >
+      <title id="flow-accounts-title">The account that matches</title>
+      <desc id="flow-accounts-desc">
+        accounts.toml declares every account with the host and path patterns it owns.
+        github.com/acme/repo matches the acme account's pattern github.com/acme/**. The personal and
+        gitea accounts do not match, so no directory layout is implied anywhere.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="215" y2="2"></line>
+      <text class="stamp" x="0" y="20">accounts.toml</text>
+
+      {
+        ACCOUNTS.map((account, i) => (
+          <>
+            {account.matched && (
+              <rect class="band" x="0" y={ROWS3[i] - 10} width="215" height="15" rx="2" />
+            )}
+            <text class={account.matched ? 'mono hit' : 'mono dim'} x="6" y={ROWS3[i]}>
+              {account.name}
+            </text>
+            <text class={account.matched ? 'mono hit' : 'mono dim'} x="72" y={ROWS3[i]}>
+              {account.pattern}
+            </text>
+          </>
+        ))
+      }
+
+      <line class="rule" x1="0" y1="108" x2="215" y2="108"></line>
+      <text class="sans dim" x="0" y="122">matched on host/path</text>
+    </svg>
+
+    <svg class="flow__arrow" viewBox="0 0 24 12" aria-hidden="true">
+      <line class="wire" x1="1" y1="6" x2="16" y2="6"></line>
+      <path class="wire-head" d={headRight(16, 6)}></path>
+    </svg>
+
+    <!-- ------------------------------------------------ stage: process -- -->
+    <svg
+      class="flow__stage"
+      style="--w: 215"
+      viewBox="0 0 215 142"
+      role="img"
+      aria-labelledby="flow-process-title flow-process-desc"
+    >
+      <title id="flow-process-title">One process, one token</title>
+      <desc id="flow-process-desc">
+        gitwho runs the command with exactly one account's credentials. GH_TOKEN is set for this one
+        process; GITEA_TOKEN and GITLAB_TOKEN are cleared before the process starts, shown struck
+        through. The token is present in one process for one invocation instead of in every process
+        for the whole session, so nothing is left in the ambient environment for an unrelated
+        process to inherit.
+      </desc>
+
+      <line class="rule" x1="0" y1="2" x2="215" y2="2"></line>
+      <text class="stamp" x="0" y="20">gh pr list</text>
+
+      {
+        ENV.map((variable, i) => (
+          <>
+            {variable.kept && (
+              <rect class="band" x="0" y={ROWS3[i] - 10} width="215" height="15" rx="2" />
+            )}
+            <text class={variable.kept ? 'mono hit' : 'mono dim'} x="6" y={ROWS3[i]}>
+              {variable.name}
+            </text>
+            {!variable.kept && (
+              <line
+                class="strike"
+                x1="4"
+                y1={ROWS3[i] - 3.6}
+                x2={strike(variable.name.length)}
+                y2={ROWS3[i] - 3.6}
+              />
+            )}
+            <text class={variable.kept ? 'mono hit' : 'mono dim'} x="112" y={ROWS3[i]}>
+              {variable.state}
+            </text>
+          </>
+        ))
+      }
+
+      <line class="rule" x1="0" y1="108" x2="215" y2="108"></line>
+      <text class="sans dim" x="0" y="122">one process, one invocation.</text>
+      <text class="sans dim" x="0" y="135">every other process sees nothing.</text>
+    </svg>
+  </div>
+</figure>
+
+<style>
+  .flow {
+    margin: 0;
+    /*
+     * Full shell width, unlike the hero's 56rem. Four stages need more room
+     * than two panels, and matching the outer width would shrink this
+     * diagram's type below the hero's. Matching the type size across the two
+     * matters more than matching their edges.
+     */
+    width: 100%;
+  }
+
+  .flow__row {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: start;
+    /* Stacked, the widest stage sets the scale; 20rem keeps 12-unit mono under
+       18px on a phone and lets the narrow stages keep the same size. */
+    width: 100%;
+    max-width: 20rem;
+    margin-inline: auto;
+  }
+
+  .flow__stage {
+    /* Proportional to the viewBox, so every stage resolves to one scale and the
+       type is a single size across the diagram. */
+    width: calc(var(--w) / 215 * 100%);
+    height: auto;
+    min-width: 0;
+  }
+
+  .flow__arrow {
+    width: 24px;
+    height: 12px;
+    /* Pointing down the column, aligned with the stages' left inset. */
+    transform: rotate(90deg);
+    margin-block: var(--s3);
+    margin-inline-start: var(--s2);
+  }
+
+  /*
+   * 56rem: four stages side by side need about 790 user units of room, so below
+   * roughly 900px the mono drops under 12px. The diagram runs full-bleed inside
+   * the shell above that, which is where the horizontal reading works.
+   */
+  @media (min-width: 56rem) {
+    .flow__row {
+      grid-template-columns: 135fr 24px 155fr 24px 215fr 24px 215fr;
+      align-items: start;
+      max-width: none;
+    }
+
+    .flow__stage {
+      width: 100%;
+    }
+
+    .flow__arrow {
+      transform: none;
+      margin: 0;
+      /* Centred on the stage rather than at a fixed offset, so it holds its
+         place as the stages scale. */
+      align-self: center;
+    }
+  }
+
+  /* ----------------------------------------------------------- ink -- */
+
+  .rule,
+  .wire,
+  .strike {
+    fill: none;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .rule {
+    stroke: var(--border);
+    shape-rendering: crispEdges;
+  }
+
+  .wire,
+  .strike {
+    stroke: var(--text-dim);
+  }
+
+  .wire-head {
+    fill: var(--text-dim);
+  }
+
+  .band {
+    fill: var(--accent-dim);
+  }
+
+  /* --------------------------------------------------------- type -- */
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    fill: var(--text);
+  }
+
+  .sans {
+    font-family: var(--font-sans);
+    /* 10, not 10.5: measured, the longest label in either diagram clears its
+       column by 11% at this size and by 3% at 10.5, and 3% is not enough slack
+       for a wider fallback face on another platform. Renders ~10px at the 360px
+       floor and ~13-14px at 1440px. */
+    font-size: 10px;
+    fill: var(--text);
+  }
+
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: var(--w-medium);
+    letter-spacing: var(--tracking-label);
+    fill: var(--text);
+  }
+
+  .dim {
+    fill: var(--text-dim);
+  }
+
+  /* The one account that matched, and the one variable that survives it. */
+  .hit {
+    fill: var(--accent);
+  }
+</style>
