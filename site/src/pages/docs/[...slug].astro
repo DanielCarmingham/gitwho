@@ -4,13 +4,36 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import { DOCS, assertSourcesPresent } from '../../docs-map';
 
 export async function getStaticPaths() {
+  /*
+   * The floor a document's body has to clear, in characters, once its title is
+   * discounted.
+   *
+   * Existence is not content. Truncate a source file to its H1 and every other
+   * guard here is satisfied — the file is present, the collection is the right
+   * length, every link still resolves — while remark-strip-title removes the
+   * one line left and the site publishes a titled, empty page. The shortest of
+   * the three documents runs to several thousand characters, so this is a floor
+   * for "something went wrong", not a style rule.
+   *
+   * Declared inside `getStaticPaths` on purpose: Astro compiles this function
+   * into its own scope, so a module-level binding in this frontmatter is not
+   * visible here — it fails at build time with `… is not defined`.
+   */
+  const MIN_BODY_CHARS = 500;
+
+  /** Body length with the leading H1 discounted, since the layout renders it. */
+  const bodyLength = (raw: string) => raw.replace(/^\s*#[^\n]*\n?/, '').trim().length;
+
   assertSourcesPresent();
 
   const entries = await getCollection('docs');
   if (entries.length !== DOCS.length) {
     throw new Error(
-      `Expected ${DOCS.length} docs entries, found ${entries.length}. ` +
-        `Is vendor/gitwho initialized? Run: git submodule update --init --recursive`,
+      `Expected ${DOCS.length} docs entries, found ${entries.length}.\n` +
+        `The collection globs the paths in DOCS (src/docs-map.ts) against the repo root, one ` +
+        `level above site/. A short count means DOCS names a file that is no longer there — ` +
+        `usually a doc renamed or moved upstream without updating DOCS.\n` +
+        `Found: ${entries.map((e) => e.id).join(', ') || '(none)'}`,
     );
   }
 
@@ -20,6 +43,17 @@ export async function getStaticPaths() {
     // — no hedging against an extension-stripped form.
     const entry = entries.find((e) => e.id === doc.file);
     if (!entry) throw new Error(`No collection entry for ${doc.file}`);
+
+    const length = bodyLength(entry.body ?? '');
+    if (length < MIN_BODY_CHARS) {
+      throw new Error(
+        `../${doc.file} has ${length} characters of body once its title is discounted, ` +
+          `below the ${MIN_BODY_CHARS}-character floor.\n` +
+          `/docs/${doc.slug} would publish as an empty page. Check the file at the repo root ` +
+          `for a truncated or half-written document rather than lowering the floor.`,
+      );
+    }
+
     return { params: { slug: doc.slug }, props: { doc, entry } };
   });
 }

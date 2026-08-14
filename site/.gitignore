@@ -2,6 +2,10 @@ node_modules/
 dist/
 .astro/
 .superpowers/
-# Design docs and implementation plans. Local working state, like .dex — they
-# carry deployment specifics that have no business in a public repo.
-docs/superpowers/
+
+# Local working state, like .dex/ at the repo root: the site's spec and plan are
+# the working record for the remaining deploy task, and they carry the webstack
+# droplet's address, its server paths and the shared Caddyfile block. This is a
+# public repo, and Cargo.toml's `site/` exclude only keeps them out of the crate
+# tarball, not off GitHub. Kept on disk, not in history.
+/docs/superpowers/

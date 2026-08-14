@@ -29,25 +29,28 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
         {
           DOCS.map((doc) => (
             <li>
-              <a href={`/docs/${doc.slug}`} aria-current={doc.slug === current ? 'page' : undefined}>
+              <a
+                href={`/docs/${doc.slug}/`}
+                aria-current={doc.slug === current ? 'page' : undefined}
+              >
                 {doc.nav}
               </a>
             </li>
           ))
         }
         {
-          // Hand-written page, not part of DOCS: config.astro reads TOML
-          // straight from the submodule rather than going through the
+          // Hand-written page, not part of DOCS: config.astro reads the TOML
+          // straight from the repo root rather than going through the
           // content collection, so it can't be mapped alongside the
           // markdown docs without breaking assertSourcesPresent's guard.
         }
         <li>
-          <a href="/docs/config" aria-current={current === 'config' ? 'page' : undefined}>
+          <a href="/docs/config/" aria-current={current === 'config' ? 'page' : undefined}>
             Config
           </a>
         </li>
         <li>
-          <a href="/docs/recipes" aria-current={current === 'recipes' ? 'page' : undefined}>
+          <a href="/docs/recipes/" aria-current={current === 'recipes' ? 'page' : undefined}>
             Recipes
           </a>
         </li>
