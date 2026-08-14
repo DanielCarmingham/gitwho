@@ -30,14 +30,19 @@ const repo = 'https://github.com/DanielCarmingham/gitwho';
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     {/*
-      The .ico is declared first and the SVG second, which is the order that
-      gets a modern browser to choose the SVG and leaves the .ico for everything
-      else — including the bare /favicon.ico a browser requests without asking
-      the document. It is a real three-image icon (16/32/48), so the `sizes`
-      list is the truth rather than the usual "32x32" placeholder.
+      The .ico covers browsers with no SVG support and the bare /favicon.ico a
+      browser requests without asking the document. It is a real three-image
+      icon (16/32/48), so the `sizes` list is the truth rather than the usual
+      "32x32" placeholder.
+
+      `sizes="any"` on the SVG is load-bearing, not decoration: without it
+      Chrome matched the .ico's exact 16x16 and used that, which was visible in
+      the tab as the .ico's theme-neutral grey rather than the SVG's ink. "any"
+      is how a scalable icon outranks a sized one, and it is what gets the
+      theme-aware asset in front of the browser most people are using.
     */}
     <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
