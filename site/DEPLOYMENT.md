@@ -38,9 +38,33 @@ building both ways — see below.
 
 ```bash
 cd site
-uc deploy -f compose.yaml
+uc deploy -f compose.yaml --recreate
 uc ls
 ```
+
+**`--recreate` is not optional, and leaving it off fails silently.** The image
+is tagged `latest`, so pushing new layers changes neither the tag nor the
+service config — `uc` compares those, sees no difference, prints
+`Services are up to date`, and leaves the old container running. The deploy
+reports success and the site does not change.
+
+Nothing in the verification below catches it either: status codes, the redirect
+direction and both cache headers all pass perfectly against a stale container.
+The only check that distinguishes a deploy that landed from one that did not is
+comparing what is actually being served against what was just built:
+
+```bash
+# the asset hash the local build produced
+grep -o '/_astro/[A-Za-z0-9._-]*\.css' site/dist/index.html | head -1
+
+# what the live site is serving — these must match
+curl -s https://www.gitwho.cc/ | grep -o '/_astro/[A-Za-z0-9._-]*\.css' | head -1
+```
+
+Astro fingerprints those filenames from content, so equal hashes mean the
+running container is built from the same source. Observed 2026-08-14: a deploy
+without `--recreate` left `BaseLayout.DGM8XPJU.css` serving while the build had
+produced `BaseLayout.DzNA6BMd.css`.
 
 ## Verify — local image, before deploying
 
