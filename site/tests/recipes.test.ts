@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parse } from 'smol-toml';
 import { RECIPES } from '../src/data/recipes';
+import { backticksBalanced } from '../src/inline-code';
 
 /*
  * The recipes are the only configs on this site a reader is invited to paste
@@ -299,6 +300,28 @@ describe('RECIPES', () => {
           [...storedVariables(account!)],
           `${recipe.id}: account "${accountName}" never declares "${variable}"`,
         ).toContain(variable);
+      }
+    }
+  });
+
+  it('pairs every backtick in the prose that gets marked up', () => {
+    // inlineCode leaves an unmatched backtick as text rather than throwing, so
+    // this is where a typo has to be caught: an odd count would otherwise ship
+    // a stray character into the sentence, which is the defect this markup was
+    // added to remove.
+    for (const recipe of RECIPES) {
+      expect(backticksBalanced(recipe.problem), `${recipe.id} problem`).toBe(true);
+    }
+  });
+
+  it('keeps backticks out of the strings that are not marked up', () => {
+    // Only `problem` goes through inlineCode. A backtick anywhere else renders
+    // literally -- in a heading, in the table of contents, or inside a shell
+    // command a reader is meant to paste.
+    for (const recipe of RECIPES) {
+      expect(recipe.title, `${recipe.id} title`).not.toContain('`');
+      for (const line of recipe.secrets) {
+        expect(line, `${recipe.id} secrets`).not.toContain('`');
       }
     }
   });

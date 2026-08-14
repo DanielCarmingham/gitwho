@@ -6,6 +6,7 @@
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import CodeBlock from '../../components/CodeBlock.astro';
 import { RECIPES } from '../../data/recipes';
+import { inlineCode } from '../../inline-code';
 
 const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: recipe.title }));
 ---
@@ -32,7 +33,19 @@ const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: rec
     RECIPES.map((recipe) => (
       <section class="prose recipe">
         <h2 id={recipe.id}>{recipe.title}</h2>
-        <p>{recipe.problem}</p>
+        {/*
+          `problem` is written with markdown backticks like the rest of the
+          site's prose, but it is data rendered through an expression, not
+          markdown, so nothing was turning them into anything and they reached
+          the page as literal characters. Segments, not a string of HTML: each
+          prose run stays a text node that Astro escapes, so the quotation marks
+          in `includeIf "gitdir:"` never go near `set:html`.
+        */}
+        <p>
+          {inlineCode(recipe.problem).map((segment) =>
+            segment.code ? <code>{segment.text}</code> : segment.text,
+          )}
+        </p>
         <CodeBlock code={recipe.toml} lang="toml" label={`the ${recipe.title} accounts.toml`} />
         {recipe.secrets.length > 0 && (
           <>
