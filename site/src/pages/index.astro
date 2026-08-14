@@ -1,55 +1,283 @@
 ---
-// Placeholder body. Task 7 replaces this page with the real landing page; what
-// is here exercises the shell: prose in the reading column, and a code block
-// with each of the three language cases the later pages use.
+/*
+ * The landing page.
+ *
+ * The order is the argument. The quick start sits above the case for the tool,
+ * not below it: a reader who arrived already convinced — from the repo, from a
+ * link, from someone who told them to use this — must not have to scroll past
+ * persuasion to reach instructions. The problem section is for the reader who
+ * is still deciding, and it is right there when the steps run out.
+ *
+ * Everything on this page is derived from ../README.md and ../docs/. Where the
+ * source states a limit, the limit is stated here at the same strength.
+ */
 import BaseLayout from '../layouts/BaseLayout.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 import HeroDiagram from '../components/HeroDiagram.astro';
 import FlowDiagram from '../components/FlowDiagram.astro';
+import Quickstart from '../components/Quickstart.astro';
+import PlatformTable from '../components/PlatformTable.astro';
 
-const config = `[accounts.work]
-email = "you@example.com"
-name = "Your Name"
-remotes = ["github.com/acme"]`;
+/*
+ * A `doctor` run over the config the quick start walks through.
+ *
+ * The shape is the tool's own: `<tag> [<check>] <message>`, with the checks it
+ * actually emits — permissions, backend, secrets, ambient. `git` and `config`
+ * findings are absent because those checks stay silent when nothing is wrong,
+ * which is why a clean run is short.
+ */
+const doctor = `ok   [permissions] /Users/you/.config/gitwho and its files are owner-only
+ok   [backend] secrets are in the age file at /Users/you/.config/gitwho/secrets.age, chosen by default
+ok   [secrets] Personal/GH_TOKEN 4c1f9ab30e77
+ok   [secrets] Work/GH_TOKEN 9e02b7d5164a
+warn [ambient] GH_TOKEN is set in the environment; every process launched from this shell inherits it`;
 
-const install = `brew install DanielCarmingham/tap/gitwho
-gitwho init`;
-
-const output = `resolved  github.com/acme/api
-account   work
-email     you@example.com`;
+const READING = [
+  {
+    href: '/docs/install',
+    label: 'docs/install',
+    gloss: 'setting it up step by step, with a check after each one and the traps that pass falsely',
+  },
+  {
+    href: '/docs/config',
+    label: 'docs/config',
+    gloss: 'the annotated accounts.toml the tool itself ships, every field explained inline',
+  },
+  {
+    href: '/docs/recipes',
+    label: 'docs/recipes',
+    gloss: 'four complete configs, checked against that schema at build time',
+  },
+  {
+    href: '/docs/design',
+    label: 'docs/design',
+    gloss: 'why it is shaped this way: the resolution algorithm, the evidence, the threat model',
+  },
+  {
+    href: '/docs/security',
+    label: 'docs/security',
+    gloss: 'what the encryption defends against, and what it plainly does not',
+  },
+  {
+    href: 'https://github.com/DanielCarmingham/gitwho',
+    label: 'github.com/DanielCarmingham/gitwho',
+    gloss: 'the source, the issue tracker, and the README this page is built from',
+  },
+];
 ---
 
 <BaseLayout
   title="gitwho — the right git identity, per repository"
-  description="gitwho picks the git identity and credentials for a repository from its remote URL, not from where it happens to sit on disk."
+  description="gitwho resolves your git identity and credentials from a repository's remote URL rather than its path on disk, so a worktree or a relocated clone still commits as the right person."
 >
-  <div class="prose">
-    <h1>The right identity, wherever the repository sits.</h1>
-    <p class="lede">
-      gitwho resolves your git identity and credentials from a repository's remote URL rather than
-      its path on disk, so a clone in the wrong directory still commits as the right person.
-    </p>
-    <p>
-      Accounts are declared once, in one file. Each one lists the remotes it owns.
-    </p>
-    <CodeBlock code={config} lang="toml" />
+  <!-- 1. The idea, then the diagram that carries it. -->
+  <section class="hero">
+    <div class="prose">
+      <h1>Identity follows the repository, not the directory.</h1>
+      <p class="lede">
+        gitwho resolves your git identity and credentials from a repository's remote URL rather than
+        where it sits on disk — so a worktree, a relocated clone or a temp directory still commits
+        as the right person.
+      </p>
+    </div>
+    <div class="hero__figure">
+      <HeroDiagram />
+    </div>
+  </section>
+
+  <!-- 2. Instructions before argument. -->
+  <div class="section">
+    <Quickstart />
   </div>
 
-  <div style="margin-block: var(--s8); display: grid; gap: var(--s8);">
-    <HeroDiagram />
-    <FlowDiagram />
-  </div>
-
-  <div class="prose">
-    <h2>Install</h2>
-    <p>Two commands. The second writes the git config include rules.</p>
-    <CodeBlock code={install} lang="sh" />
-    <h2>Check what it resolved</h2>
+  <!-- 3. The case, for the reader still deciding. -->
+  <section class="section prose">
+    <h2>The problem</h2>
     <p>
-      Resolution is meant to be inspectable: <code>gitwho which</code> prints the account it would
-      use for the current repository, and why.
+      Working across several accounts — personal, two employers, a self-hosted Gitea — means every
+      repository needs a different author identity <em>and</em> different credentials for whatever
+      touches it: <code>gh</code>, <code>tea</code>, an IDE, an MCP server. Getting it wrong is
+      quiet. You commit as the wrong person, or authenticate as the wrong account, and nothing tells
+      you.
     </p>
-    <CodeBlock code={output} />
-  </div>
+    <p>
+      The usual approaches key off the <strong>filesystem path</strong> — <code
+        >includeIf "gitdir:"</code
+      > rules plus per-directory environment loading. That breaks as soon as a repository is not where
+      the rule expects: a clone made somewhere else, or a worktree placed in a tool's own root. It breaks
+      <em>silently</em>, falling back to whichever account is the default.
+    </p>
+    <p>
+      So gitwho keys off the repository instead. Identity resolves from the remote URL, credentials
+      come from a helper git hands the URL it is about to contact, and CLI credentials are injected
+      into one process for one invocation. One file declares your accounts; nothing else needs
+      editing when you add one.
+    </p>
+  </section>
+
+  <!-- 4. What a run actually reports, warning included. -->
+  <section class="section">
+    <div class="prose">
+      <h2 id="doctor">What <code class="bare">doctor</code> reports</h2>
+      <p>
+        <code>gitwho doctor</code> is the one to run after any change. It is read-only, exits
+        non-zero on problems, and never prints a secret value — only fingerprints — so its output is
+        safe to paste when you are asking for help.
+      </p>
+    </div>
+    <div class="doctor">
+      <CodeBlock code={doctor} />
+    </div>
+    <div class="prose doctor__note">
+      <p>
+        That <code>[ambient]</code> line is left visible on purpose. It means a provider token is
+        sitting in the environment, where every process launched from that shell inherits it — which
+        is the exposure this tool exists to remove, not a check to quieten. The README reports the
+        same warning against the author's own machine rather than hiding it.
+      </p>
+    </div>
+  </section>
+
+  <!-- 5. How a credential reaches exactly one process. -->
+  <section class="section">
+    <div class="prose">
+      <h2>One process, one invocation</h2>
+      <p>
+        The property that matters is not the encryption. It is that a token is fetched by the one
+        process that needs it, at the moment it needs it, instead of sitting in your environment
+        where everything you launch inherits it.
+      </p>
+    </div>
+    <div class="hero__figure">
+      <FlowDiagram />
+    </div>
+  </section>
+
+  <!-- 6. The limits, at the strength the README states them. -->
+  <section class="section">
+    <div class="prose">
+      <h2>Platform reality</h2>
+      <p>
+        Stated precisely, because the gap between these rows is easy to paper over.
+      </p>
+    </div>
+    <PlatformTable />
+    <div class="prose platform-note">
+      <p>
+        One more gap, in the tool rather than the platform: <code>jj</code> takes its credentials
+        from git, so pushing works — but it keeps author identity in its own config and does not
+        read gitconfig's <code>includeIf</code> rules, so in a colocated repository <code>jj</code>
+        and <code>git</code> can commit as different people without saying so.
+      </p>
+    </div>
+  </section>
+
+  <!-- 7. Where to go next. -->
+  <section class="section">
+    <div class="prose">
+      <h2>Reading</h2>
+    </div>
+    <ul class="reading">
+      {
+        READING.map((item) => (
+          <li>
+            <a href={item.href}>{item.label}</a>
+            <span>{item.gloss}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 </BaseLayout>
+
+<style>
+  /*
+   * The hero and the first step of the quick start have to share the first
+   * screen on a laptop, so the space under the hero is one step tighter than
+   * the rhythm the rest of the page keeps.
+   */
+  .hero__figure {
+    margin-top: var(--s6);
+  }
+
+  .section {
+    margin-top: var(--s8);
+  }
+
+  .hero + .section {
+    margin-top: var(--s7);
+  }
+
+  /* Headings name a command here, and a command keeps its face without
+     acquiring the inline-code chip in the middle of a heading. */
+  h2 .bare {
+    padding: 0;
+    font-size: 1em;
+    background: none;
+    border: 0;
+  }
+
+  /*
+   * Terminal output, not prose: measured, the longest line here is about 102
+   * characters, so the reading column would put a scrollbar under a block whose
+   * whole job is to be read at a glance. Wider than `--measure`, narrower than
+   * the shell — the surrounding paragraphs stay in the reading column.
+   */
+  .doctor {
+    margin-top: var(--s4);
+    max-width: 60rem;
+  }
+
+  .doctor__note {
+    margin-top: var(--s4);
+  }
+
+  .platform-note {
+    margin-top: var(--s6);
+    color: var(--text-dim);
+  }
+
+  /*
+   * Destinations in mono, glosses in sans: the same split the header and
+   * footer use. Two columns once there is room for the longest path, one
+   * column below that rather than a wrapped and ragged pair.
+   */
+  .reading {
+    margin-top: var(--s5);
+    padding: 0;
+    list-style: none;
+    max-width: 48rem;
+  }
+
+  .reading li + li {
+    margin-top: var(--s4);
+    padding-top: var(--s4);
+    border-top: var(--hair) solid var(--border);
+  }
+
+  .reading a {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--t-sm);
+  }
+
+  .reading span {
+    display: block;
+    margin-top: var(--s1);
+    font-size: var(--t-md);
+    color: var(--text-dim);
+  }
+
+  @media (min-width: 52rem) {
+    .reading li {
+      display: grid;
+      grid-template-columns: 22rem 1fr;
+      gap: var(--s4);
+      align-items: baseline;
+    }
+
+    .reading span {
+      margin-top: 0;
+    }
+  }
+</style>

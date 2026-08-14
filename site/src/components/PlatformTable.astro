@@ -1,0 +1,91 @@
+---
+/*
+ * The README's platform table, reproduced word for word.
+ *
+ * The Windows row is the reason this component exists. It says the code has
+ * never run on Windows and should not be treated as working, and it is stated
+ * on the landing page at full strength — not softened, not folded into a
+ * disclosure, not moved to a footnote. A project willing to publish its own
+ * limitation is making the strongest available claim about everything else it
+ * says, and hiding this row would leave the site less truthful than the README
+ * it is built from.
+ *
+ * Written out rather than generated from data: each row carries its own
+ * emphasis and code spans, and the wording has to be diffable against the
+ * README by eye.
+ */
+---
+
+<div class="platform scroll-x">
+  <table>
+    <caption class="sr-only">gitwho platform support, stated per platform</caption>
+    <tbody>
+      <tr>
+        <th scope="row">macOS</th>
+        <td>verified — this is where it runs every day</td>
+      </tr>
+      <tr>
+        <th scope="row">Linux</th>
+        <td>
+          the test suite passes on x86-64 in CI. On Debian/aarch64 the whole <code>init</code> flow
+          has also been driven by hand: store modes, identity, the credential helper, a shim
+          executed for real, and the <code>.bashrc</code> PATH line
+        </td>
+      </tr>
+      <tr>
+        <th scope="row">Windows</th>
+        <td>
+          the <code>%APPDATA%</code> path, the <code>.cmd</code> shim and the <code>PATHEXT</code>
+          lookup are unit-tested as pure functions <strong
+            >from macOS, and have never run on Windows</strong
+          >. Do not treat them as working
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<style>
+  /*
+   * The global `overflow-x` rule is scoped to `.prose table`, and this table
+   * sits outside the reading column so its second cell has room. It therefore
+   * carries its own scroller — `.scroll-x` in global.css — rather than being
+   * allowed to widen the page on a phone.
+   */
+  .platform {
+    margin-top: var(--s5);
+    /* Not the full 68rem shell: the Linux row would run past a readable line
+       length long before the page ran out of room. */
+    max-width: 48rem;
+  }
+
+  .platform table {
+    width: 100%;
+  }
+
+  /*
+   * A platform name is a proper noun, not something you type, so it stays in
+   * the sans face and at full ink — the site's mono-for-typeable rule would
+   * otherwise dim exactly the word the row is about.
+   */
+  .platform th {
+    width: 1%;
+    padding-inline-end: var(--s5);
+    font-family: var(--font-sans);
+    font-size: var(--t-md);
+    font-weight: var(--w-semi);
+    letter-spacing: normal;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .platform td {
+    color: var(--text-dim);
+  }
+
+  /* The one sentence on this page that must not be skimmed past. */
+  .platform strong {
+    font-weight: var(--w-semi);
+    color: var(--text);
+  }
+</style>

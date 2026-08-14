@@ -1,0 +1,256 @@
+---
+/*
+ * The four steps, in the order you actually do them.
+ *
+ * Numbered markers are used here because this genuinely is a sequence, and
+ * because the order carries the one thing a reader has to know in advance:
+ * step 2 stops. `init --write` scaffolds an empty `accounts.toml` and refuses
+ * to go further, which looks like a crash if nobody warned you. So the stop
+ * gets the only accented rule on the page, and the exact text it prints is
+ * reproduced rather than described.
+ *
+ * The worked config is not written here. It is pulled from `RECIPES`, which
+ * `tests/recipes.test.ts` parses and checks key-by-key against
+ * `../docs/accounts.toml.example` — so the config on the landing page cannot
+ * drift out of the tool's own schema without failing the build.
+ */
+import CodeBlock from './CodeBlock.astro';
+import { RECIPES } from '../data/recipes';
+
+/** The recipe this page walks through. Two GitHub accounts on one host. */
+const WORKED = 'github-org';
+const worked = RECIPES.find((recipe) => recipe.id === WORKED);
+if (!worked) {
+  throw new Error(
+    `Quickstart renders the "${WORKED}" recipe, which is not in src/data/recipes.ts. ` +
+      `Point it at an existing recipe rather than inlining a config here: the recipes are ` +
+      `the only configs checked against the tool's schema at build time.`,
+  );
+}
+
+const brew = 'brew install DanielCarmingham/tap/gitwho';
+
+const curl =
+  'curl -LsSf https://github.com/DanielCarmingham/gitwho/releases/latest/download/gitwho-installer.sh | sh';
+
+const cargo = 'cargo install gitwho';
+
+/*
+ * The README writes these with trailing comments. They are carried into the
+ * prose around the block instead: at the reading column's width the commented
+ * lines put a horizontal scrollbar under the page's primary instruction, and
+ * the two commands are what the copy button should hand over anyway.
+ */
+const init = `gitwho init
+gitwho init --write`;
+
+/* Reproduced from docs/INSTALL.md, which reproduces what `init --write` prints. */
+const stop = `created       ~/.config/gitwho/identity.key (owner-only)
+created       ~/.config/gitwho/accounts.toml
+
+Now the part only you can do:
+
+  1. edit ~/.config/gitwho/accounts.toml
+     replace the example accounts with yours
+  2. gitwho secret set <Account> <VAR>    once per token
+  3. gitwho init --write                  re-run to finish`;
+
+const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
+---
+
+<section class="qs" aria-labelledby="quickstart">
+  <div class="prose">
+    <h2 id="quickstart">Quick start</h2>
+    <p>
+      Installing it is one line. The part that takes thought is the file it hands you afterwards —
+      so the steps below go as far as a machine that <code>doctor</code> calls healthy, not just as
+      far as a binary on <code>PATH</code>.
+    </p>
+  </div>
+
+  <ol class="qs__steps">
+    <li class="qs__step">
+      <span class="qs__n" aria-hidden="true">1</span>
+      <div class="qs__body prose">
+        <h3>Install the binary</h3>
+        <CodeBlock code={brew} lang="sh" />
+        <p class="label">or, with no package manager</p>
+        <CodeBlock code={curl} lang="sh" />
+        <p class="label">or, with a rust toolchain</p>
+        <CodeBlock code={cargo} lang="sh" />
+        <p>
+          macOS and Linux, on x86-64 and arm64. Every route puts a <code>gitwho</code> binary in
+          <code>~/.cargo/bin</code>, so that directory needs to be on your <code>PATH</code>. You
+          also need <strong>git ≥ 2.36</strong> — <code>includeIf "hasconfig:remote.*.url:"</code>
+          landed there.
+        </p>
+        <p>
+          Pick the location once and leave it alone: <code>init</code> bakes the binary's absolute
+          path into everything it generates, so moving it later breaks that config silently.
+        </p>
+      </div>
+    </li>
+
+    <li class="qs__step">
+      <span class="qs__n" aria-hidden="true">2</span>
+      <div class="qs__body prose">
+        <h3>Run <code>init</code>, and let it stop</h3>
+        <p>
+          One command, run twice, with your accounts written in between. The first is a dry run: it
+          lists every step it would take and writes nothing.
+        </p>
+        <CodeBlock code={init} lang="sh" />
+        <p>
+          The second creates the store, scaffolds an empty <code>accounts.toml</code>, and halts:
+        </p>
+        <CodeBlock code={stop} />
+        <p class="note">
+          It stops on purpose. Generating rules from a template of placeholders would give you a
+          machine that looks configured and resolves every repository to an account that does not
+          exist — working-but-wrong, which is the failure this tool exists to prevent. Nothing has
+          gone wrong; step 3 is your half of it.
+        </p>
+      </div>
+    </li>
+
+    <li class="qs__step">
+      <span class="qs__n" aria-hidden="true">3</span>
+      <div class="qs__body prose">
+        <h3>Write your accounts</h3>
+        <p>
+          Open <code>~/.config/gitwho/accounts.toml</code>. It names environment variables and never
+          holds their values, which is what lets it live in a dotfiles repo. A complete two-account
+          config:
+        </p>
+        <CodeBlock code={worked.toml} lang="toml" />
+        <p>
+          <code>match</code> runs against <code>host/path</code>, which is why two GitHub accounts
+          on one host can be told apart — by organisation, with no directory layout implied.
+        </p>
+        <p>
+          Not your shape? <a href="/docs/recipes">Recipes</a> has three more complete configs, and
+          <a href="/docs/config">the annotated template</a> explains every field.
+        </p>
+      </div>
+    </li>
+
+    <li class="qs__step">
+      <span class="qs__n" aria-hidden="true">4</span>
+      <div class="qs__body prose">
+        <h3>Store the tokens, then finish</h3>
+        <CodeBlock code={finish} lang="sh" />
+        <p>
+          <code>secret set</code> reads the value from stdin, so it never enters <code>argv</code>,
+          because <code>ps</code> is public. Stored values are printed back only as fingerprints.
+        </p>
+        <p>
+          If <code>gh</code> is already logged in as that account you can skip storing a token
+          altogether — <code>env = [&#123; var = "GH_TOKEN", from = "gh", user = "..." &#125;]</code>
+          reads it from <code>gh</code> on demand, so there is no copy to keep in sync.
+          <a href="/docs/install">Installing gitwho</a> covers when that is worth doing.
+        </p>
+        <p>
+          <code>init</code> is idempotent. Re-run it whenever you add an account; every step reports
+          <code>ok</code> when there was nothing to do, so a second run tells you exactly what
+          changed.
+        </p>
+      </div>
+    </li>
+  </ol>
+
+  <div class="qs__close prose">
+    <p>Then, after any change:</p>
+    <CodeBlock code="gitwho doctor" lang="sh" />
+    <p>
+      A healthy run prints <code>ok</code> for every check and exits zero — the store's permissions
+      are intact, every token the config names is present, and git's credential helper actually
+      reaches gitwho. <a href="#doctor">What that looks like</a> is below.
+    </p>
+  </div>
+</section>
+
+<style>
+  /*
+   * Ruled rows rather than cards. The list is the one textured block on an
+   * otherwise quiet page, so the hairlines do the structural work and nothing
+   * gets a surface, a shadow or a fill.
+   */
+  .qs__steps {
+    margin-top: var(--s6);
+    padding: 0;
+    list-style: none;
+  }
+
+  .qs__step {
+    display: grid;
+    grid-template-columns: 2ch 1fr;
+    gap: 0 var(--s4);
+    align-items: start;
+    padding-top: var(--s5);
+    border-top: var(--hair) solid var(--border);
+  }
+
+  /* The global `li + li` rule is for prose lists; these are ruled sections. */
+  .qs__step + .qs__step {
+    margin-top: var(--s7);
+  }
+
+  .qs__n {
+    font-family: var(--font-mono);
+    font-size: var(--t-sm);
+    line-height: var(--lh-snug);
+    /* Sits on the h3's cap height rather than its line box. */
+    padding-top: 0.2em;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .qs__body {
+    /* Code blocks must be free to shrink inside the track. */
+    min-width: 0;
+  }
+
+  /*
+   * The one accent on this page that is not a link. It marks the single thing
+   * a first-time reader will otherwise misread as a crash.
+   */
+  .note {
+    padding-inline-start: var(--s4);
+    border-inline-start: 2px solid var(--accent);
+  }
+
+  .qs__close {
+    margin-top: var(--s7);
+    padding-top: var(--s5);
+    border-top: var(--hair) solid var(--border);
+  }
+
+  .qs__close > * + * {
+    margin-top: var(--s3);
+  }
+
+  /* Mono keeps its voice in a heading; the inline-code chip does not belong
+     there, so the box is dropped and only the face survives. */
+  .qs__body h3 code {
+    padding: 0;
+    font-size: 1em;
+    background: none;
+    border: 0;
+  }
+
+  /* A mono caption naming the route, not a sentence about it. */
+  .qs__body .label {
+    margin-top: var(--s5);
+  }
+
+  .qs__body .label + :global(figure) {
+    margin-top: var(--s2);
+  }
+
+  @media (max-width: 26rem) {
+    .qs__step {
+      grid-template-columns: 1fr;
+      gap: var(--s2);
+    }
+  }
+</style>
