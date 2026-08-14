@@ -6,19 +6,38 @@ interface Props {
   code: string;
   /** A Shiki language id. Omitted means plain text. */
   lang?: string;
+  /**
+   * What this snippet is, for the copy button's accessible name.
+   *
+   * The landing page carries seven of these blocks, so a button named "copy"
+   * is one of seven identically named controls in the tab order and in any
+   * elements list. The language alone does not separate them either — four of
+   * the seven are `sh` — so pass a phrase wherever the distinction matters.
+   */
+  label?: string;
 }
 
-const { code, lang } = Astro.props;
+const { code, lang, label } = Astro.props;
 
 // Trailing whitespace would render as a blank final line and be copied along
 // with the snippet.
 const source = code.replace(/\s+$/, '');
+
+/*
+ * The visible word stays "copy"; the accessible name extends it rather than
+ * replacing it, so what a speech-input user says still matches what they see
+ * (WCAG 2.5.3). The button's own text is not announced while aria-label is
+ * present, which is why the result is reported by the live region below.
+ */
+const copyLabel = `copy ${label ?? (lang ? `${lang} snippet` : 'snippet')}`;
 ---
 
 <figure class="code">
   <div class="code__bar">
     {lang && <span class="code__lang">{lang}</span>}
-    <button type="button" class="code__copy" data-copy={source}>copy</button>
+    <button type="button" class="code__copy" aria-label={copyLabel} data-copy={source}>
+      copy
+    </button>
   </div>
   <Code
     code={source}
