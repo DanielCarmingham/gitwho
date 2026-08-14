@@ -5,6 +5,7 @@ use gitwho::config::Config;
 use gitwho::doctor::{self, GitWiring, Level, Store};
 use gitwho::secrets::{Backend, EnvBackend};
 use gitwho::secrets::{BackendKind, Choice, Source};
+use gitwho::sources::{Captured, MapRunner};
 use tempfile::TempDir;
 
 const ACCOUNTS: &str = r#"
@@ -128,7 +129,14 @@ fn run_with(
     // Bound with a `let`: as a temporary it would drop before `run` stats
     // anything, and every path would silently read as nonexistent.
     let dir = hardened_store();
-    doctor::run(config, backend, ambient, wiring, &store_at(dir.path()))
+    doctor::run(
+        config,
+        backend,
+        &no_sources(),
+        ambient,
+        wiring,
+        &store_at(dir.path()),
+    )
 }
 
 #[test]
@@ -426,6 +434,7 @@ fn a_hardened_store_reports_no_permission_problems() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -452,6 +461,7 @@ fn a_config_directory_that_is_not_owner_only_is_a_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -483,6 +493,7 @@ fn a_group_or_world_readable_accounts_toml_is_a_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -515,6 +526,7 @@ fn a_permission_finding_says_what_to_run_to_fix_it() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -545,6 +557,7 @@ fn a_readable_identity_key_is_a_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -573,6 +586,7 @@ fn a_readable_secrets_file_is_a_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -605,6 +619,7 @@ fn a_store_owned_by_someone_else_is_a_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store,
@@ -645,6 +660,7 @@ fn a_store_with_no_secrets_file_yet_is_not_a_permission_problem() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store_at(dir.path()),
@@ -673,6 +689,7 @@ fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store,
@@ -702,6 +719,7 @@ fn doctor_warns_when_owner_only_permissions_cannot_be_enforced() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store,
@@ -730,6 +748,7 @@ fn a_keychain_store_is_not_warned_about_file_permissions() {
     let findings = doctor::run(
         &config,
         &stocked_backend(),
+        &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
         &store,
@@ -740,5 +759,174 @@ fn a_keychain_store_is_not_warned_about_file_permissions() {
             .iter()
             .any(|f| f.level == Level::Warn && f.message.contains("secrets.age")),
         "a store with no file should raise no file-permission warning; got {findings:?}"
+    );
+}
+
+/// A runner with no answers at all.
+///
+/// Most of these configs reference no external tool, so consulting it would be
+/// a bug -- an empty map turns that into a visible failure rather than a silent
+/// success.
+fn no_sources() -> MapRunner {
+    MapRunner::new(HashMap::new())
+}
+
+// --- variables read from another tool ---------------------------------------
+
+/// One account whose token lives in gh, one whose token lives in the store.
+const WITH_A_SOURCE: &str = r#"
+    [defaults]
+    account = "Personal"
+    gitName = "Test Person"
+
+    [[accounts]]
+    name = "Personal"
+    provider = "github"
+    email = "me@example.com"
+    gitCredential = "GH_TOKEN"
+    match = ["github.com/Personal/**"]
+    env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
+
+    [[accounts]]
+    name = "SelfHosted"
+    provider = "gitea"
+    email = "you@example.net"
+    match = ["ssh.git.example.net/**"]
+    env = ["GITEA_TOKEN"]
+"#;
+
+fn gh_holding(token: &str) -> MapRunner {
+    MapRunner::new(HashMap::from([(
+        MapRunner::key("gh", &["auth", "token", "--user", "octocat"]),
+        Captured {
+            success: true,
+            stdout: token.to_string(),
+            stderr: String::new(),
+        },
+    )]))
+}
+
+fn run_with_sources(
+    config: &Config,
+    backend: &dyn Backend,
+    runner: &dyn gitwho::sources::Runner,
+    ambient: &BTreeMap<String, String>,
+) -> Vec<doctor::Finding> {
+    let dir = hardened_store();
+    doctor::run(
+        config,
+        backend,
+        runner,
+        ambient,
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    )
+}
+
+/// The store holds nothing for GH_TOKEN, and that is correct -- gh holds it.
+/// Reporting it as missing would make a working setup look broken.
+#[test]
+fn a_referenced_variable_is_not_reported_as_missing_from_the_store() {
+    let config = Config::parse(WITH_A_SOURCE).unwrap();
+    let store = EnvBackend::from_map(HashMap::from([(
+        "GITEA_TOKEN_SelfHosted".to_string(),
+        "gitea-token".to_string(),
+    )]));
+
+    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &BTreeMap::new());
+
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.message.contains("GH_TOKEN has no stored value")),
+        "{findings:#?}"
+    );
+    assert!(problems(&findings).is_empty(), "{findings:#?}");
+}
+
+/// It still has to appear. A credential that silently drops out of the report
+/// is the opposite of what `doctor` is for.
+#[test]
+fn a_referenced_variable_is_reported_with_its_source_and_a_fingerprint() {
+    let config = Config::parse(WITH_A_SOURCE).unwrap();
+    let store = EnvBackend::from_map(HashMap::from([(
+        "GITEA_TOKEN_SelfHosted".to_string(),
+        "gitea-token".to_string(),
+    )]));
+
+    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &BTreeMap::new());
+
+    let line = findings
+        .iter()
+        .find(|f| f.message.starts_with("Personal/GH_TOKEN"))
+        .expect("the referenced variable must be reported");
+
+    assert_eq!(line.level, Level::Ok);
+    assert!(line.message.contains("from gh"), "{}", line.message);
+    // Fingerprint, never the value (R10).
+    assert!(
+        !line.message.contains("gho_live"),
+        "doctor printed the token: {}",
+        line.message
+    );
+    assert!(
+        line.message
+            .contains(&gitwho::secrets::fingerprint("gho_live")),
+        "{}",
+        line.message
+    );
+}
+
+/// The declaration can be perfect while the tool it points at has nothing --
+/// after `gh auth logout`, for instance. That is a problem, not a warning: the
+/// next push would fail.
+#[test]
+fn a_reference_the_tool_cannot_answer_is_a_problem() {
+    let config = Config::parse(WITH_A_SOURCE).unwrap();
+    let store = EnvBackend::from_map(HashMap::from([(
+        "GITEA_TOKEN_SelfHosted".to_string(),
+        "gitea-token".to_string(),
+    )]));
+
+    let findings = run_with_sources(
+        &config,
+        &store,
+        &gh_holding("unused").without("gh"),
+        &BTreeMap::new(),
+    );
+
+    let problem = problems(&findings)
+        .into_iter()
+        .find(|f| f.check == "secrets")
+        .expect("an unanswerable reference must be a problem");
+
+    assert!(problem.message.contains("GH_TOKEN"), "{}", problem.message);
+    assert!(problem.message.contains("gh"), "{}", problem.message);
+}
+
+/// Where the value comes from changes nothing about the hazard: this shell has
+/// already exported one, and every process launched from it inherits that one.
+#[test]
+fn a_referenced_variable_sitting_in_the_environment_still_warns() {
+    let config = Config::parse(WITH_A_SOURCE).unwrap();
+    let store = EnvBackend::from_map(HashMap::from([(
+        "GITEA_TOKEN_SelfHosted".to_string(),
+        "gitea-token".to_string(),
+    )]));
+    let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "gho_ambient".to_string())]);
+
+    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &ambient);
+
+    let warning = findings
+        .iter()
+        .find(|f| f.check == "ambient")
+        .expect("an exported GH_TOKEN must still be reported");
+
+    assert_eq!(warning.level, Level::Warn);
+    assert!(warning.message.contains("GH_TOKEN"), "{}", warning.message);
+    assert!(
+        !warning.message.contains("gho_ambient"),
+        "the value must never be printed: {}",
+        warning.message
     );
 }

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{Account, Config};
 use crate::secrets::Backend;
+use crate::sources::{self, Runner};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
@@ -16,6 +17,8 @@ pub enum ExecError {
     MissingSecret { account: String, var: String },
     #[error("secret store failed: {0}")]
     Store(#[from] crate::secrets::SecretError),
+    #[error("{0}")]
+    Value(#[from] crate::sources::ValueError),
 }
 
 /// The environment changes to apply before running a command.
@@ -34,6 +37,7 @@ pub struct EnvPlan {
 pub fn plan_env(
     config: &Config,
     backend: &dyn Backend,
+    runner: &dyn Runner,
     account: &Account,
 ) -> Result<EnvPlan, ExecError> {
     // Everything any account manages gets cleared first. Deriving this from
@@ -47,19 +51,21 @@ pub fn plan_env(
 
     for spec in &account.env {
         // `VAR=value` is a literal, for non-secret settings such as an API
-        // host. A bare `VAR` names a secret to fetch.
-        if let Some((var, value)) = spec.split_once('=') {
-            plan.set.insert(var.to_string(), value.to_string());
+        // host. Everything else names a value to go and fetch -- from the
+        // store, or from whichever tool the entry points at.
+        if let Some(value) = spec.literal() {
+            plan.set.insert(spec.name().to_string(), value.to_string());
             continue;
         }
 
-        let value = backend
-            .get(&account.name, spec)?
-            .ok_or_else(|| ExecError::MissingSecret {
+        let var = spec.name();
+        let value = sources::value_for(backend, runner, account, var)?.ok_or_else(|| {
+            ExecError::MissingSecret {
                 account: account.name.clone(),
-                var: spec.clone(),
-            })?;
-        plan.set.insert(spec.clone(), value);
+                var: var.to_string(),
+            }
+        })?;
+        plan.set.insert(var.to_string(), value);
     }
 
     Ok(plan)
@@ -76,8 +82,10 @@ fn managed_variables(config: &Config) -> BTreeSet<String> {
 
     for account in &config.accounts {
         for spec in &account.env {
-            let name = spec.split_once('=').map_or(spec.as_str(), |(name, _)| name);
-            names.insert(name.to_string());
+            // Sourced entries included: a referenced variable still lands in
+            // the environment, so it still has to be cleared before another
+            // account's command runs.
+            names.insert(spec.name().to_string());
         }
         if let Some(var) = &account.git_credential {
             names.insert(var.clone());

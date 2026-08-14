@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::config::{Account, Config};
 use crate::resolve;
 use crate::secrets::Backend;
+use crate::sources::{self, Runner};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
@@ -26,6 +27,8 @@ pub enum CredentialError {
     MissingSecret { account: String, var: String },
     #[error("secret store failed: {0}")]
     Store(#[from] crate::secrets::SecretError),
+    #[error("{0}")]
+    Value(#[from] crate::sources::ValueError),
 }
 
 /// One request from git, as key/value lines.
@@ -87,6 +90,7 @@ pub struct Credential {
 pub fn respond(
     config: &Config,
     backend: &dyn Backend,
+    runner: &dyn Runner,
     request: &Request,
     cwd: Option<&Path>,
 ) -> Result<Credential, CredentialError> {
@@ -100,7 +104,11 @@ pub fn respond(
                 account: account.name.clone(),
             })?;
 
-    let password = backend.get(&account.name, var)?.ok_or_else(|| {
+    // Wherever the account says this variable lives -- the store, or a tool
+    // already holding it. A declared source that cannot answer surfaces as its
+    // own error rather than as an absence, so it can never be mistaken for
+    // "nothing stored yet".
+    let password = sources::value_for(backend, runner, account, var)?.ok_or_else(|| {
         // Loudly, and without falling back to any other account's token: a
         // working-but-wrong credential is the failure this project exists to
         // remove (R8).

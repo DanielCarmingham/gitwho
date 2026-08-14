@@ -9,4 +9,5 @@ pub mod paths;
 pub mod resolve;
 pub mod secrets;
 pub mod shim;
+pub mod sources;
 pub mod sync;

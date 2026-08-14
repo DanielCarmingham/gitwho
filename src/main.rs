@@ -13,6 +13,7 @@ use gitwho::exec::plan_env;
 use gitwho::resolve::{resolve_repo, Reason};
 use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
 use gitwho::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
+use gitwho::sources::ProcessRunner;
 
 #[derive(Parser)]
 #[command(
@@ -245,7 +246,7 @@ fn doctor_report() -> Result<ExitCode, String> {
         owner_only_enforced: AgeFileBackend::protection() == gitwho::secrets::Protection::OwnerOnly,
     };
 
-    let findings = gitwho::doctor::run(&config, backend, &ambient, &wiring, &store);
+    let findings = gitwho::doctor::run(&config, backend, &runner(), &ambient, &wiring, &store);
 
     for finding in &findings {
         let tag = match finding.level {
@@ -797,7 +798,7 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
         }
     };
 
-    let plan = plan_env(&config, backend, account).map_err(|e| e.to_string())?;
+    let plan = plan_env(&config, backend, &runner(), account).map_err(|e| e.to_string())?;
 
     let (program, args) = command.split_first().expect("clap requires a command");
     let mut child = process::Command::new(program);
@@ -861,8 +862,8 @@ fn credential_get() -> Result<String, String> {
     let request = Request::parse(&input);
     let cwd = std::env::current_dir().ok();
 
-    let credential =
-        respond(&config, backend, &request, cwd.as_deref()).map_err(|e| e.to_string())?;
+    let credential = respond(&config, backend, &runner(), &request, cwd.as_deref())
+        .map_err(|e| e.to_string())?;
 
     Ok(format!(
         "username={}\npassword={}\n",
@@ -946,4 +947,19 @@ fn secrets_path() -> Result<PathBuf, String> {
 
 fn identity_path() -> Result<PathBuf, String> {
     path_from_env("GITWHO_IDENTITY", "identity.key")
+}
+
+/// A command runner that will not find gitwho's own shims.
+///
+/// The shim directory sits at the front of `PATH` and its `gh` runs
+/// `gitwho exec -- /real/gh`, so resolving `gh` normally from inside the
+/// credential helper re-enters gitwho and loops. Skipping the directory is what
+/// makes reading a token from `gh` safe on a machine where shims are installed
+/// -- which is every machine gitwho has finished setting up.
+fn runner() -> ProcessRunner {
+    match default_shim_dir() {
+        Ok(dir) => ProcessRunner::skipping(vec![dir]),
+        // No HOME to derive one from, so there is no shim directory to avoid.
+        Err(_) => ProcessRunner::unshimmed(),
+    }
 }

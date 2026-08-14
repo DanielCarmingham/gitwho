@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use gitwho::config::Config;
 use gitwho::credential::{respond, Request};
 use gitwho::secrets::EnvBackend;
+use gitwho::sources::MapRunner;
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -41,7 +42,7 @@ fn answers_a_request_with_the_token_for_the_org_in_the_url() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\nhost=github.com\npath=WorkOrg/thing.git\n");
 
-    let credential = respond(&config, &backend(), &request, None).unwrap();
+    let credential = respond(&config, &backend(), &no_sources(), &request, None).unwrap();
 
     assert_eq!(credential.password, "work-token");
 }
@@ -59,7 +60,7 @@ fn a_missing_secret_fails_instead_of_falling_back_to_another_account() {
     )]));
     let request = Request::parse("protocol=https\nhost=github.com\npath=WorkOrg/thing.git\n");
 
-    let error = respond(&config, &only_personal, &request, None)
+    let error = respond(&config, &only_personal, &no_sources(), &request, None)
         .expect_err("a missing secret must not fall back to another account");
 
     let message = error.to_string();
@@ -81,7 +82,7 @@ fn an_unknown_host_gets_no_credential_at_all() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\nhost=evil.example.com\npath=someone/repo.git\n");
 
-    let error = respond(&config, &backend(), &request, None)
+    let error = respond(&config, &backend(), &no_sources(), &request, None)
         .expect_err("an unclaimed host must not receive any token");
 
     let message = error.to_string();
@@ -118,7 +119,7 @@ fn an_ssh_account_is_never_handed_a_token() {
     let request =
         Request::parse("protocol=https\nhost=ssh.git.example.net\npath=someone/site.git\n");
 
-    let error = respond(&config, &backend(), &request, None)
+    let error = respond(&config, &backend(), &no_sources(), &request, None)
         .expect_err("an ssh account has no token to give");
 
     let message = error.to_string();
@@ -150,8 +151,14 @@ fn a_low_confidence_resolution_does_not_release_a_token() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\n");
 
-    let error = respond(&config, &backend(), &request, Some(dir.path()))
-        .expect_err("a default-account resolution must not release a token");
+    let error = respond(
+        &config,
+        &backend(),
+        &no_sources(),
+        &request,
+        Some(dir.path()),
+    )
+    .expect_err("a default-account resolution must not release a token");
 
     let message = error.to_string();
     assert!(
@@ -189,11 +196,26 @@ fn an_unmatched_remote_does_not_release_a_token_either() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\n");
 
-    let error = respond(&config, &backend(), &request, Some(dir.path()))
-        .expect_err("an unmatched remote must not release a token");
+    let error = respond(
+        &config,
+        &backend(),
+        &no_sources(),
+        &request,
+        Some(dir.path()),
+    )
+    .expect_err("an unmatched remote must not release a token");
 
     assert!(
         !error.to_string().contains("personal-token"),
         "a token leaked on an unmatched remote: {error}"
     );
+}
+
+/// A runner with no answers at all.
+///
+/// None of these accounts reference an external tool, so consulting it would be
+/// a bug -- an empty map turns that into a failing test rather than a silent
+/// success.
+fn no_sources() -> MapRunner {
+    MapRunner::new(HashMap::new())
 }

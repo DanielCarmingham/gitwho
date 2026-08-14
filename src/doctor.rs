@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::secrets::{fingerprint, Backend, BackendKind, Choice};
+use crate::sources::{self, Runner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -102,6 +103,7 @@ pub fn current_uid() -> u32 {
 pub fn run(
     config: &Config,
     backend: &dyn Backend,
+    runner: &dyn Runner,
     ambient_env: &BTreeMap<String, String>,
     git: &GitWiring,
     store: &Store,
@@ -113,7 +115,7 @@ pub fn run(
     check_permissions(store, &mut findings);
     check_storage(store, &mut findings);
     check_config(config, &mut findings);
-    check_secrets(config, backend, &mut findings);
+    check_secrets(config, backend, runner, &mut findings);
     check_ambient(config, ambient_env, &mut findings);
     check_git_wiring(git, &mut findings);
 
@@ -339,7 +341,12 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
     }
 }
 
-fn check_secrets(config: &Config, backend: &dyn Backend, findings: &mut Vec<Finding>) {
+fn check_secrets(
+    config: &Config,
+    backend: &dyn Backend,
+    runner: &dyn Runner,
+    findings: &mut Vec<Finding>,
+) {
     for account in &config.accounts {
         for var in account.secret_vars() {
             match backend.get(&account.name, var) {
@@ -360,6 +367,34 @@ fn check_secrets(config: &Config, backend: &dyn Backend, findings: &mut Vec<Find
                 )),
             }
         }
+
+        // Referenced variables are not in `secret_vars` -- nothing is owed to
+        // the store for them -- so without this they would vanish from the
+        // report entirely, and a credential silently missing from `doctor` is
+        // the opposite of what `doctor` is for.
+        //
+        // This is the one check that runs another program. It is why `doctor`
+        // is worth running after `gh auth logout` and not only after editing
+        // `accounts.toml`: the declaration can be perfect while the tool it
+        // points at has nothing.
+        for sourced in account.sourced_vars() {
+            let var = &sourced.var;
+            match sources::fetch(runner, &account.name, sourced) {
+                Ok(value) => findings.push(Finding::new(
+                    Level::Ok,
+                    "secrets",
+                    format!(
+                        "{}/{var} {} (from {})",
+                        account.name,
+                        fingerprint(&value),
+                        sourced.from
+                    ),
+                )),
+                // The source's own message, which already names the account and
+                // the variable and says what the tool said.
+                Err(e) => findings.push(Finding::new(Level::Problem, "secrets", e.to_string())),
+            }
+        }
     }
 }
 
@@ -373,7 +408,16 @@ fn check_ambient(config: &Config, env: &BTreeMap<String, String>, findings: &mut
     let mut seen = std::collections::BTreeSet::new();
 
     for account in &config.accounts {
-        for var in account.secret_vars() {
+        // Referenced variables included: where the value comes from changes
+        // nothing about the hazard, which is that this shell already exports
+        // one and every process launched from it inherits that one.
+        let sourced = account.sourced_vars();
+        let watched = account
+            .secret_vars()
+            .into_iter()
+            .chain(sourced.iter().map(|s| s.var.as_str()));
+
+        for var in watched {
             if env.contains_key(var) && seen.insert(var.to_string()) {
                 findings.push(Finding::new(
                     Level::Warn,

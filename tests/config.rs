@@ -23,11 +23,12 @@ fn the_shipped_example_config_parses() {
     // committed (R10).
     for account in &config.accounts {
         for spec in &account.env {
-            if let Some((_, value)) = spec.split_once('=') {
+            if let Some(value) = spec.literal() {
                 assert!(
                     !value.to_ascii_lowercase().contains("token"),
-                    "{} declares a literal that looks like a secret: {spec}",
-                    account.name
+                    "{} declares a literal that looks like a secret: {}={value}",
+                    account.name,
+                    spec.name()
                 );
             }
         }

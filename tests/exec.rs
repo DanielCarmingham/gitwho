@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use gitwho::config::Config;
 use gitwho::exec::plan_env;
 use gitwho::secrets::EnvBackend;
+use gitwho::sources::MapRunner;
 
 /// Two providers, so one account's variables are another's contamination.
 const ACCOUNTS: &str = r#"
@@ -43,7 +44,7 @@ fn injects_the_declared_variables_for_the_account() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let account = config.account("Personal").unwrap();
 
-    let plan = plan_env(&config, &backend(), account).unwrap();
+    let plan = plan_env(&config, &backend(), &no_sources(), account).unwrap();
 
     assert_eq!(
         plan.set.get("GH_TOKEN").map(String::as_str),
@@ -60,7 +61,7 @@ fn variables_belonging_to_other_accounts_are_scrubbed() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let selfhosted = config.account("SelfHosted").unwrap();
 
-    let plan = plan_env(&config, &backend(), selfhosted).unwrap();
+    let plan = plan_env(&config, &backend(), &no_sources(), selfhosted).unwrap();
 
     assert!(
         plan.remove.contains("GH_TOKEN"),
@@ -80,7 +81,7 @@ fn a_scrubbed_variable_the_account_needs_is_still_set() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let selfhosted = config.account("SelfHosted").unwrap();
 
-    let plan = plan_env(&config, &backend(), selfhosted).unwrap();
+    let plan = plan_env(&config, &backend(), &no_sources(), selfhosted).unwrap();
 
     assert_eq!(
         plan.set.get("GITEA_TOKEN").map(String::as_str),
@@ -101,11 +102,21 @@ fn a_missing_secret_refuses_rather_than_running_with_a_gap() {
     let empty = EnvBackend::from_map(HashMap::new());
     let account = config.account("Personal").unwrap();
 
-    let error = plan_env(&config, &empty, account).expect_err("a missing secret must refuse");
+    let error = plan_env(&config, &empty, &no_sources(), account)
+        .expect_err("a missing secret must refuse");
 
     let message = error.to_string();
     assert!(
         message.contains("Personal") && message.contains("GH_TOKEN"),
         "the error must name the account and variable; got: {message}"
     );
+}
+
+/// A runner with no answers at all.
+///
+/// None of these accounts reference an external tool, so consulting it would be
+/// a bug -- an empty map turns that into a failing test rather than a silent
+/// success.
+fn no_sources() -> MapRunner {
+    MapRunner::new(HashMap::new())
 }
