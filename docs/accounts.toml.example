@@ -64,7 +64,8 @@ sshKey = "~/.ssh/id_ed25519_personal"
 match = ["github.com/your-username/**"]
 
 # What `gitwho exec` injects, and therefore what the `gh`/`tea` shims see. A
-# bare NAME fetches a secret; NAME=value is a literal, for non-secret settings.
+# bare NAME fetches a secret from the store; NAME=value is a literal, for
+# non-secret settings; a table reads the value from a tool that already has it.
 env = ["GH_TOKEN"]
 
 # Consulted **only** for a repo with no remote yet -- a fresh `git init`.
@@ -90,7 +91,27 @@ match = [
     "github.com/example-corp/**",
     "github.com/example-corp-labs/**",
 ]
-env = ["GH_TOKEN"]
+
+# This account reads its token from `gh` instead of storing one, so there is no
+# `gitwho secret set` step for it and nothing to update when you rotate.
+#
+# It is a pointer, not a copy. That distinction is the point: a copy is correct
+# until the day you run `gh auth refresh`, after which gitwho holds a token that
+# is present, decryptable and wrong -- which is the failure this tool exists to
+# prevent, not one it should introduce.
+#
+#   from  the tool to ask. Only `gh` today.
+#   user  which of its accounts. Passed as `gh auth token --user`, which reads
+#         that account without `gh auth switch`, so nothing global is mutated.
+#         Omit it and you get whichever account gh currently considers active,
+#         which is only ever right by luck on a multi-account machine.
+#   host  optional; omit it and gh uses its own default host.
+#
+# Costs a process spawn -- about 60 ms against about 10 ms for a stored value --
+# so it is worth declaring per variable rather than everywhere out of habit.
+# If gh cannot answer, gitwho fails and says so. It never quietly falls back to
+# a stored value.
+env = [{ var = "GH_TOKEN", from = "gh", user = "your-work-username" }]
 paths = ["~/src/work/"]
 
 

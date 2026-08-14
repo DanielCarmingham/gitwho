@@ -100,6 +100,11 @@ gitwho secret set Work GH_TOKEN    # once per token; the value never enters argv
 gitwho init --write                # finishes, and ends by running doctor
 ```
 
+If `gh` is already logged in as that account, you can skip storing a token
+altogether — `env = [{ var = "GH_TOKEN", from = "gh", user = "..." }]` reads it
+from `gh` on demand, so there is no copy to keep in sync. See
+[Security](#security).
+
 `init` is idempotent — re-run it whenever you add an account. Every step
 reports `ok` when there was nothing to do, so a second run tells you exactly
 what changed.
@@ -128,7 +133,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 139 tests, clippy clean.
+no longer exports a token per directory. 161 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that
@@ -158,14 +163,27 @@ of sitting in your environment where everything you launch inherits it. `exec`
 clears every managed variable before setting the resolved account's, so nothing
 ambient survives into the child.
 
-Around that: values live in an age-encrypted file unlocked by an identity key,
-both created `0600` inside a `0700` directory — and created at that mode rather
-than chmod'd afterwards, so there is no window where the file is complete and
-readable. Values never enter `argv` (`secret set` reads stdin, because `ps` is
-public), are never printed (only fingerprints), and never enter the repository
-(`accounts.toml` names variables). `doctor` fails outright if those permissions
-drift, and warns when a provider token is sitting in your environment — the
-exposure this exists to remove.
+Around that: stored values live in an age-encrypted file unlocked by an identity
+key, both created `0600` inside a `0700` directory — and created at that mode
+rather than chmod'd afterwards, so there is no window where the file is complete
+and readable. Values never enter `argv` (`secret set` reads stdin, because `ps`
+is public), are never printed (only fingerprints), and never enter the
+repository (`accounts.toml` names variables). `doctor` fails outright if those
+permissions drift, and warns when a provider token is sitting in your
+environment — the exposure this exists to remove.
+
+A variable can also name a tool that already holds its value, in which case
+gitwho stores nothing at all and reads it on demand:
+
+```toml
+env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
+```
+
+That is a pointer, not a copy, so it cannot go stale when you rotate the token —
+and on macOS the value stays in `gh`'s keychain entry rather than gitwho's file.
+It costs a process spawn (~60 ms against ~10 ms), which is why it is declared
+per variable rather than switched on globally. If the tool cannot answer,
+gitwho fails and says so; it never falls back to a stored copy.
 
 **What it does not do:** the identity key sits next to the ciphertext, both
 owned by you, so anything running as your user can decrypt everything. The

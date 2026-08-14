@@ -90,6 +90,32 @@ exists to prevent.
 So: edit the config (see [the schema](#the-config) below), store your tokens,
 and run it a third time. Now it finishes, and ends by running `doctor`.
 
+### Skipping step 2 for accounts `gh` already knows
+
+If you are already logged in with `gh`, there is nothing to store and nothing to
+paste. Declare where the value lives instead:
+
+```toml
+env = [{ var = "GH_TOKEN", from = "gh", user = "your-username" }]
+```
+
+`gh auth status` lists the accounts you can name there. Step 2 disappears for
+each account declared this way, and so does maintaining it: this is a pointer,
+not a copy, so `gh auth refresh` is picked up on the next call rather than
+leaving gitwho holding a token that is present, decryptable and wrong.
+
+Two things to know before using it everywhere. It costs a process spawn — about
+60 ms against about 10 ms for a stored value — which is why it is declared per
+variable rather than globally. And it only works for credentials another tool
+owns: a token used solely by an MCP server, or a fine-grained PAT scoped more
+narrowly than gh's OAuth token, still belongs in the store. You cannot ask `gh`
+for a token with scopes it does not hold.
+
+If `gh` cannot answer — not installed, or no such account — gitwho fails and
+names the account and variable. It never falls back to a stored value, because
+a stored value that disagrees with the tool is exactly the stale copy this
+avoids.
+
 **`init` is idempotent.** Re-run it after adding an account, or after moving the
 binary. Every step reports `ok` when there was nothing to do, so a second run
 tells you exactly what changed — nothing, ideally.

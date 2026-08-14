@@ -150,6 +150,52 @@ chooses them automatically, because they do not draw the same boundary:
 Only the first is stronger than an age file that is already `0600` and owned by
 you. On the other two, flipping the default would buy nothing measurable.
 
+### Referencing a token beats copying one
+
+Most machines already hold the tokens gitwho wants. The tempting move is to
+import them, and it is the wrong one: a copy is correct until the original is
+rotated, after which gitwho holds a credential that is present, decryptable and
+wrong — the R8 failure, introduced by the feature meant to make setup easier.
+The development machine already had an instance of it, an account `gh` reports
+as having an invalid token, sitting in a config nobody revisits.
+
+So a variable may name where its value lives instead, and gitwho stores nothing:
+
+```toml
+env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
+```
+
+Measured against gh 2.97.0, macOS, 2026-08-13:
+
+| | |
+|---|---|
+| `gh auth token --hostname H --user U` | reads one named account — **no `gh auth switch`**, so no process-wide active account is mutated (R9) |
+| ambient `GH_TOKEN` set to a decoy | ignored; the named account's real token still came back |
+| account absent | exit 1, `no oauth token found for github.com account X` |
+| cost | **~60 ms**, against ~10 ms for a store read |
+
+That last row is why this is declared per variable rather than switched on
+globally: R15's budget is untouched for anyone who does not opt in. It also
+means the at-rest question changes shape for referenced variables — on macOS
+the value sits in `gh`'s keychain entry, which `gh` reads without prompting,
+rather than in gitwho's file.
+
+**A declared source that cannot answer is an error, never a fallback.** Not to
+the store, and not to the environment. Falling back would produce a
+working-but-wrong credential from a *stale copy* — precisely the thing
+referencing exists to stop keeping.
+
+Two implementation notes worth not rediscovering:
+
+- **Resolving `gh` normally re-enters gitwho.** The shim directory leads `PATH`
+  and its `gh` runs `gitwho exec -- /real/gh`, so the credential helper asking
+  for a token calls itself. The runner skips its own shim directories. The
+  symptom looked like a config parse error rather than a loop.
+- **Referencing does not replace the store.** It only works where another tool
+  owns the credential and can be asked per account. A token no CLI owns, a PAT
+  scoped more narrowly than gh's OAuth token, and providers whose CLI keeps a
+  refresh-token cache rather than a static string are all still the store's job.
+
 ---
 
 ## What this protects, and what it does not
