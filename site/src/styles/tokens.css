@@ -77,7 +77,15 @@
     --surface: #1e1e23;
     --text: #e8e8e4;
     --text-dim: #9a9a94;
-    --border: #303038;
+    /*
+     * Deliberately not the mirror of the light border. #303038 on #16161a is
+     * 1.39:1, which is almost exactly the light pair's 1.33:1 — and yet it
+     * disappears, because contrast ratio is a poor predictor of visibility down
+     * at this luminance. A hairline with no surface behind it, like the rules
+     * framing the hero diagram, needs the extra step; a border around a --surface
+     * card gets help from the fill and would have survived either value.
+     */
+    --border: #3d3d47;
     --accent: #e8834f;
     --accent-dim: #33231b;
     --ok: #6fbf85;
@@ -92,7 +100,8 @@
   --surface: #1e1e23;
   --text: #e8e8e4;
   --text-dim: #9a9a94;
-  --border: #303038;
+  /* Keep in step with the media-query copy above, which carries the reasoning. */
+  --border: #3d3d47;
   --accent: #e8834f;
   --accent-dim: #33231b;
   --ok: #6fbf85;

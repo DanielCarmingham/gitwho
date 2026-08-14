@@ -323,10 +323,13 @@ const ROWS3 = [48, 70, 92];
     fill: var(--text);
   }
 
+  /* Matches HeroDiagram's stamp; see the note there for why it outsizes the
+     rows it heads. Kept in step so the two diagrams on one page do not label
+     themselves at two different weights. */
   .stamp {
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: var(--w-medium);
+    font-size: 12px;
+    font-weight: var(--w-semi);
     letter-spacing: var(--tracking-label);
     fill: var(--text);
   }

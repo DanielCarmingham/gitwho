@@ -230,10 +230,18 @@ const GITDIR = [
     fill: var(--text);
   }
 
+  /*
+   * Set above the rows it heads, not below them. At 11px/500 against 12px/400
+   * mono this label was the smallest text in the panel while being its title,
+   * so the panel read as starting at ~/work/repo and the whole comparison lost
+   * its frame. The inversion is there in both themes; it only becomes obvious
+   * in dark, where light-on-dark strokes bloom and flatten the weight
+   * difference that was carrying the hierarchy on its own.
+   */
   .stamp {
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: var(--w-medium);
+    font-size: 12px;
+    font-weight: var(--w-semi);
     letter-spacing: var(--tracking-label);
     fill: var(--text);
   }
