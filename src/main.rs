@@ -12,7 +12,9 @@ use gitwho::credential::{respond, Request};
 use gitwho::exec::plan_env;
 use gitwho::resolve::{resolve_repo, Reason};
 use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
-use gitwho::secrets::{fingerprint, AgeFileBackend, Backend, EnvBackend, KeychainBackend};
+use gitwho::secrets::{
+    fingerprint, AgeFileBackend, Backend, DeferredBackend, EnvBackend, KeychainBackend,
+};
 use gitwho::sources::ProcessRunner;
 
 #[derive(Parser)]
@@ -921,11 +923,17 @@ fn unicode_env() -> impl Iterator<Item = (String, String)> {
 fn open_backend(configured: Option<&str>) -> Result<(Box<dyn Backend>, Choice), String> {
     let choice = choose_backend(configured)?;
 
+    // Opened, but not *required* to open. An account whose variables all come
+    // from another tool never asks the store for anything, and failing here
+    // would make such a machine need a secret store it will never read --
+    // contradicting the whole point of referencing a token instead of copying
+    // it. `DeferredBackend` keeps the failure and reports it on first use,
+    // where the account and variable are known.
     let backend: Box<dyn Backend> = match choice.kind {
-        BackendKind::AgeFile => Box::new(
+        BackendKind::AgeFile => Box::new(DeferredBackend::new(
             AgeFileBackend::with_identity_file(secrets_path()?, &identity_path()?)
-                .map_err(|e| e.to_string())?,
-        ),
+                .map(|b| Box::new(b) as Box<dyn Backend>),
+        )),
         BackendKind::Keychain => Box::new(KeychainBackend::new()),
     };
 

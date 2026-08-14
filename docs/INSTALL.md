@@ -104,6 +104,12 @@ each account declared this way, and so does maintaining it: this is a pointer,
 not a copy, so `gh auth refresh` is picked up on the next call rather than
 leaving gitwho holding a token that is present, decryptable and wrong.
 
+If **every** variable in your config is declared this way, there is no secret
+store to create either — no `identity.key`, no `secrets.age`, no
+`gitwho secret init`. gitwho opens the store lazily and only complains about a
+missing one when something actually asks it for a value. A config that does need
+it still fails loudly, and names the account and variable that wanted it.
+
 Two things to know before using it everywhere. It costs a process spawn — about
 60 ms against about 10 ms for a stored value — which is why it is declared per
 variable rather than globally. And it only works for credentials another tool

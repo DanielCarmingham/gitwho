@@ -212,3 +212,71 @@ fn an_empty_value_is_refused_rather_than_stored() {
 
     assert!(error.to_string().contains("empty"), "got: {error}");
 }
+
+// --- a store that is never asked for anything --------------------------------
+
+/// An account whose variables all come from another tool never touches the
+/// store. Refusing to run because there is no `identity.key` would make such a
+/// machine set up a secret store it will never read -- which contradicts the
+/// point of referencing a token rather than copying it.
+#[test]
+fn a_store_that_failed_to_open_costs_nothing_until_it_is_used() {
+    let broken =
+        gitwho::secrets::DeferredBackend::new(Err(gitwho::secrets::SecretError::Backend {
+            account: "-".to_string(),
+            var: "/nowhere/identity.key".to_string(),
+            message: "cannot read identity: No such file or directory".to_string(),
+        }));
+
+    // Constructing it is not an error, and nothing has been read.
+    let error = broken
+        .get("Personal", "GH_TOKEN")
+        .expect_err("asking a store that could not open must fail");
+
+    let message = error.to_string();
+
+    // It fails where the account and variable are known, so the message can
+    // name them -- which the eager version could not.
+    assert!(message.contains("Personal/GH_TOKEN"), "{message}");
+    assert!(message.contains("/nowhere/identity.key"), "{message}");
+    assert!(message.contains("cannot read identity"), "{message}");
+
+    // And it says it once. Re-wrapping a Backend error whole produced
+    // "secret store failed for X: secret store failed for Y".
+    assert_eq!(
+        message.matches("secret store failed").count(),
+        1,
+        "the failure is reported twice: {message}"
+    );
+}
+
+/// Deferring the failure must not swallow it. Writing is the case where a
+/// silent success would be worst.
+#[test]
+fn a_store_that_failed_to_open_still_refuses_to_write() {
+    let broken =
+        gitwho::secrets::DeferredBackend::new(Err(gitwho::secrets::SecretError::Backend {
+            account: "-".to_string(),
+            var: "/nowhere/identity.key".to_string(),
+            message: "cannot read identity".to_string(),
+        }));
+
+    assert!(broken.set("Personal", "GH_TOKEN", "value").is_err());
+    assert!(broken.delete("Personal", "GH_TOKEN").is_err());
+}
+
+/// A store that opened fine is passed through untouched.
+#[test]
+fn a_store_that_opened_behaves_exactly_as_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let deferred = gitwho::secrets::DeferredBackend::new(Ok(Box::new(test_backend(&dir))));
+
+    deferred.set("Work", "GH_TOKEN", "stored-value").unwrap();
+
+    assert_eq!(
+        deferred.get("Work", "GH_TOKEN").unwrap().as_deref(),
+        Some("stored-value")
+    );
+    // Absence is still absence, not a deferred failure.
+    assert_eq!(deferred.get("Work", "MISSING").unwrap(), None);
+}

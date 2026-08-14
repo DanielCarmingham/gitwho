@@ -13,10 +13,11 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
-and MCP wrapping all route real traffic. 161 tests, clippy clean.
+and MCP wrapping all route real traffic. 164 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
-suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600` modes, identity
+suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
+modes, identity
 resolution, the credential helper, a shim executed with the shim dir first on
 `PATH`, and the `.bashrc` branch — pass on Debian bookworm/aarch64 under
 `rust:1.88`. Reproduce with `docker run --rm -v "$PWD:/src:ro" -w /work
@@ -48,7 +49,8 @@ still *builds* elsewhere.
   is why `Resolved` carries a `reason` and why `Unmatched` is distinct from
   `Default`.
 - **Secrets never enter this repo** (R10). Config that *names* a variable is
-  tracked; values live only in the store. Never echo a token value —
+  tracked; a value never is. It lives in the store, or in the tool a variable
+  references — never in `accounts.toml`. Never echo a token value —
   fingerprints or prefixes only, including in test output and error messages.
 - **No global mutable credential state** (R9). No `gh auth switch`-style
   process-wide active account. Per-process / per-invocation only.
@@ -123,7 +125,10 @@ Providers differ in **mechanism**, not just variable name:
 
 The declaration schema is in
 [docs/accounts.toml.example](docs/accounts.toml.example). `env` and
-`gitCredential` name variables; values live in the store.
+`gitCredential` name variables, never values. A value lives in the store, or —
+for `{ var = "…", from = "gh", user = "…" }` entries — stays in the tool that
+already holds it and is read on demand. A referenced variable needs no stored
+value, so a config with only referenced variables needs no secret store at all.
 
 ## Verified environment
 
@@ -190,7 +195,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 161 pass, 1 ignored
+cargo test                              # 164 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

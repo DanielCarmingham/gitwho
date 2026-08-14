@@ -102,7 +102,8 @@ gitwho init --write                # finishes, and ends by running doctor
 
 If `gh` is already logged in as that account, you can skip storing a token
 altogether — `env = [{ var = "GH_TOKEN", from = "gh", user = "..." }]` reads it
-from `gh` on demand, so there is no copy to keep in sync. See
+from `gh` on demand, so there is no copy to keep in sync. Declare every variable
+that way and there is no secret store to set up at all. See
 [Security](#security).
 
 `init` is idempotent — re-run it whenever you add an account. Every step
@@ -133,7 +134,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 161 tests, clippy clean.
+no longer exports a token per directory. 164 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

@@ -47,6 +47,65 @@ pub trait Backend {
     fn delete(&self, account: &str, var: &str) -> Result<(), SecretError>;
 }
 
+/// A backend whose failure to open is deferred until something asks it for a
+/// value.
+///
+/// An account whose variables all come from another tool never touches the
+/// store, and making it create one anyway contradicts the point of referencing:
+/// there is nothing to migrate, so there should be nothing to set up. Opening
+/// eagerly meant `gitwho exec` refused on a missing `identity.key` that the
+/// resolved account would never have read.
+///
+/// The failure is kept rather than discarded, so a config that *does* need the
+/// store still fails -- and fails better, because by then the account and
+/// variable are known and can be named.
+pub struct DeferredBackend {
+    inner: Result<Box<dyn Backend>, String>,
+}
+
+impl DeferredBackend {
+    pub fn new(opened: Result<Box<dyn Backend>, SecretError>) -> Self {
+        Self {
+            // Flattened to a string because `SecretError` is not `Clone` and
+            // this has to be reportable once per call rather than once.
+            //
+            // A `Backend` error is unwrapped to its path and detail rather than
+            // displayed whole: it will be re-wrapped by the error this returns,
+            // and "secret store failed for X: secret store failed for Y" tells
+            // the reader nothing twice.
+            inner: opened.map_err(|e| match e {
+                SecretError::Backend { var, message, .. } => format!("{var}: {message}"),
+                other => other.to_string(),
+            }),
+        }
+    }
+
+    fn get_or_report(&self, account: &str, var: &str) -> Result<&dyn Backend, SecretError> {
+        match &self.inner {
+            Ok(backend) => Ok(backend.as_ref()),
+            Err(message) => Err(SecretError::Backend {
+                account: account.to_string(),
+                var: var.to_string(),
+                message: message.clone(),
+            }),
+        }
+    }
+}
+
+impl Backend for DeferredBackend {
+    fn get(&self, account: &str, var: &str) -> Result<Option<String>, SecretError> {
+        self.get_or_report(account, var)?.get(account, var)
+    }
+
+    fn set(&self, account: &str, var: &str, value: &str) -> Result<(), SecretError> {
+        self.get_or_report(account, var)?.set(account, var, value)
+    }
+
+    fn delete(&self, account: &str, var: &str) -> Result<(), SecretError> {
+        self.get_or_report(account, var)?.delete(account, var)
+    }
+}
+
 /// A short, stable identifier for a value that reveals nothing about it.
 ///
 /// This is the only representation of a secret that may appear in output,
