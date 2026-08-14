@@ -21,6 +21,10 @@ describe('remarkStripTitle', () => {
   it('leaves a level-1 heading that is not first', () => {
     const out = run('Intro paragraph.\n\n# Not The Title\n');
     expect(out).toContain('# Not The Title');
+    // Without this, an unconditional `children.shift()` — no type check, no
+    // depth check — passes every test in this file while eating the first
+    // paragraph of every document.
+    expect(out).toContain('Intro paragraph.');
   });
 
   it('leaves deeper headings alone', () => {
