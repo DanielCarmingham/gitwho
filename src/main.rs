@@ -69,6 +69,13 @@ enum Command {
         /// Which CLIs to wrap. Names not found on PATH are skipped.
         #[arg(long, value_delimiter = ',', default_value = "gh,tea")]
         shims: Vec<String>,
+        /// Read the repositories under these roots and print a proposed
+        /// accounts.toml to stdout. Writes nothing, and does no setup.
+        #[arg(long, num_args = 1.., value_name = "ROOT")]
+        discover: Vec<PathBuf>,
+        /// How many directories below each root to descend when discovering.
+        #[arg(long, default_value = "6", value_name = "N")]
+        discover_depth: usize,
     },
 
     /// Report whether the wiring is coherent. Read-only; changes nothing.
@@ -174,13 +181,25 @@ fn main() -> ExitCode {
             write,
             shim_dir,
             shims,
-        } => match init(write, shim_dir, &shims) {
-            Ok(code) => code,
-            Err(message) => {
-                eprintln!("gitwho: {message}");
-                ExitCode::FAILURE
+            discover,
+            discover_depth,
+        } => {
+            // Discovery is a different job from setup: it reads, prints and
+            // stops. Running the setup steps as well would mean a command whose
+            // output you are meant to pipe had also changed the machine.
+            let result = if discover.is_empty() {
+                init(write, shim_dir, &shims)
+            } else {
+                discover_config(&discover, discover_depth)
+            };
+            match result {
+                Ok(code) => code,
+                Err(message) => {
+                    eprintln!("gitwho: {message}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         Command::Sync { dir, write } => match sync_config(dir, write) {
             Ok(code) => code,
             Err(message) => {
@@ -970,4 +989,39 @@ fn runner() -> ProcessRunner {
         // No HOME to derive one from, so there is no shim directory to avoid.
         Err(_) => ProcessRunner::unshimmed(),
     }
+}
+
+/// Print a proposed `accounts.toml` from the repositories under `roots`.
+///
+/// Writes nothing, and deliberately does none of `init`'s setup: the output is
+/// meant to be piped into a file, and a command that both prints to stdout and
+/// changes the machine is one you cannot safely pipe.
+///
+/// Exits non-zero when nothing was found, so `--discover` in a script fails
+/// rather than silently producing a config with no accounts in it.
+fn discover_config(roots: &[PathBuf], max_depth: usize) -> Result<ExitCode, String> {
+    let limits = gitwho::discover::Limits {
+        max_depth,
+        ..Default::default()
+    };
+
+    let scan = gitwho::discover::scan(roots, &limits, &gitwho::discover::GitRemotes);
+
+    // Progress goes to stderr so stdout stays a clean config. Scanning a large
+    // tree takes long enough that silence reads as a hang.
+    eprintln!(
+        "gitwho: scanned {} root(s), found {} repositories in {} organisation(s)",
+        roots.len(),
+        scan.repo_count(),
+        scan.orgs.len()
+    );
+
+    let logins = gitwho::discover::gh_logins(&runner());
+    print!("{}", gitwho::discover::render(&scan, roots, &logins));
+
+    Ok(if scan.is_empty() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }

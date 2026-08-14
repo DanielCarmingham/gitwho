@@ -90,6 +90,39 @@ exists to prevent.
 So: edit the config (see [the schema](#the-config) below), store your tokens,
 and run it a third time. Now it finishes, and ends by running `doctor`.
 
+### Step 1 from what is already on disk
+
+`gitwho init --discover <roots>` walks the given directories, reads every
+`remote.origin.url`, groups by `host/org`, and prints a proposed `accounts.toml`
+to stdout. It writes nothing, so the output can be reviewed, edited and piped:
+
+```sh
+gitwho init --discover ~/src                          # look at it first
+gitwho init --discover ~/src > ~/.config/gitwho/accounts.toml
+```
+
+What it can and cannot do, because the difference decides how much to trust it:
+
+- **It finds organisations, not accounts.** Nothing on disk says two orgs are
+  the same person. Each org becomes its own block, and the header says to merge
+  them by hand. It will not guess, because a config that looks authoritative and
+  is subtly wrong is the failure this whole tool exists to prevent.
+- **An org with a single repository is not proposed**, on the assumption that
+  one clone means somebody else's work. Measured on the author's machine: of 9
+  organisations found, 8 had exactly one repository and every one of those was
+  an upstream project. They are still listed with their pattern, so promoting
+  one is a copy-paste.
+- **Emails are never invented.** Every one is `REPLACE-ME`, as is the default
+  account — picking that is not a guess worth making.
+- **It reports what it could not do**: repositories with no remote (which is
+  what `paths` is for), remotes it could not parse, roots that do not exist, and
+  directories the depth bound stopped it at. A partial scan says it was partial.
+
+Worktrees are found: a linked worktree's `.git` is a *file*, and several
+worktrees of one repository collapse to a single entry. Every URL form git
+writes is understood, including scp-style with a non-`git` user, because this
+reuses the resolver's own parsing rather than a second spelling of it.
+
 ### Skipping step 2 for accounts `gh` already knows
 
 If you are already logged in with `gh`, there is nothing to store and nothing to

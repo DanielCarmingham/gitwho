@@ -85,7 +85,7 @@ impl Reason {
 ///
 /// A scheme is what disambiguates a port from an scp separator, so the colon
 /// is only rewritten when no scheme was present.
-fn normalize(url: &str) -> String {
+pub fn normalize(url: &str) -> String {
     let (had_scheme, rest) = match url.split_once("://") {
         Some((_, rest)) => (true, rest),
         None => (false, url),

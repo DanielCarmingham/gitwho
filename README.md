@@ -93,7 +93,17 @@ gitwho init --write     # creates the store, scaffolds accounts.toml, stops
 ```
 
 It stops there on purpose, because the next part is the one thing it cannot do
-for you: put your accounts in `~/.config/gitwho/accounts.toml`. Then
+for you: put your accounts in `~/.config/gitwho/accounts.toml`. To get a head
+start, read the repositories you already have:
+
+```sh
+gitwho init --discover ~/src            # prints a proposal, writes nothing
+```
+
+It groups every `remote.origin.url` it finds by `host/org` and prints a config
+you can pipe into a file. It **cannot** know which orgs are the same person, so
+it says so rather than guessing — merging those blocks is the part left to you.
+Then
 
 ```sh
 gitwho secret set Work GH_TOKEN    # once per token; the value never enters argv
@@ -118,6 +128,7 @@ produce false passes.
 
 ```
 gitwho init          set everything up; safe to re-run
+gitwho init --discover <roots>   propose accounts.toml from repos on disk
 gitwho doctor        report whether the wiring is coherent (read-only)
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
@@ -134,7 +145,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 164 tests, clippy clean.
+no longer exports a token per directory. 186 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that
