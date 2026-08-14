@@ -1,0 +1,24 @@
+:80 {
+	# One canonical hostname. The apex still needs to resolve and still needs a
+	# cert -- the browser validates TLS before it ever sees this redirect --
+	# but it should never serve the site itself.
+	@apex host gitwho.cc
+	redir @apex https://www.gitwho.cc{uri} permanent
+
+	root * /srv
+	encode zstd gzip
+	file_server
+
+	# Astro fingerprints these filenames, so they can be cached forever.
+	@immutable path /_astro/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# Everything else -- including this. `trailingSlash: 'always'` means every
+	# page is requested as a directory (`/docs/recipes/`), not as `*.html`, so
+	# a `path / *.html` matcher never matches it and pages silently ship with
+	# no Cache-Control header at all. Matching by exclusion instead of by
+	# extension is what actually covers every generated page. HTML must
+	# revalidate or a deploy never reaches anyone.
+	@revalidate not path /_astro/*
+	header @revalidate Cache-Control "public, max-age=0, must-revalidate"
+}

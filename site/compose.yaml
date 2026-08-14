@@ -1,0 +1,19 @@
+services:
+  gitwho-cc:
+    image: gitwho-cc:latest
+    build:
+      # The repo root, not site/: the site reads its documentation from
+      # ../docs and ../SECURITY.md at build time, which are outside site/ and
+      # so must be inside the build context. See the comment atop Dockerfile.
+      context: ..
+      dockerfile: site/Dockerfile
+      # The cluster runs amd64. Without this, a build from an Apple Silicon
+      # machine produces an arm64 image that dies with "exec format error".
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    # Uncloud extension: the cluster Caddy terminates TLS and routes by
+    # hostname. The standard `ports:` key cannot carry the /https protocol.
+    x-ports:
+      - gitwho.cc:80/https
+      - www.gitwho.cc:80/https

@@ -1,0 +1,22 @@
+# site/compose.yaml builds with context: .. (the repo root) and
+# dockerfile: site/Dockerfile, because the site reads its documentation from
+# ../docs and ../SECURITY.md at build time -- see the comment atop
+# site/Dockerfile. Docker only honours a .dockerignore at the CONTEXT root, not
+# next to the Dockerfile: a site/.dockerignore (or even site/Dockerfile.dockerignore)
+# is silently ignored here, confirmed by building both ways -- 5.138GB either
+# unignored or with a site/-scoped file, 1.443MB with this file. So this one
+# lives at the repo root, not in site/, even though everything else this task
+# touches lives there. Without it the context includes the whole Rust
+# project -- gigabytes of build artifacts the image never needs.
+target/
+target.noindex/
+site/node_modules/
+site/dist/
+site/.astro/
+.git/
+.jj/
+.dex/
+site/.superpowers/
+
+# Local working notes for this deploy task; not part of the build.
+site/docs/superpowers/
