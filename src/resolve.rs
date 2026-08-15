@@ -73,6 +73,18 @@ impl Reason {
     pub fn identifies_an_account(self) -> bool {
         !matches!(self, Reason::Default | Reason::Unmatched)
     }
+
+    /// How this answer was arrived at, phrased for a person about to store a
+    /// secret against it.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Reason::UrlMatch => "matched a remote URL",
+            Reason::OriginUrl => "matched the origin remote",
+            Reason::PathFallback => "matched a directory prefix",
+            Reason::Unmatched => "no account claims this remote",
+            Reason::Default => "the declared default",
+        }
+    }
 }
 
 /// Reduce a remote URL to the `host/path` form that patterns are written

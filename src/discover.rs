@@ -297,6 +297,13 @@ fn split_host_org_repo(normalized: &str) -> Option<(String, String, String)> {
 pub struct Logins {
     /// Host to the account names available on it.
     pub by_host: BTreeMap<String, Vec<String>>,
+    /// Host to the account names gh holds but could not authenticate.
+    ///
+    /// Kept apart from `by_host` rather than dropped: for `init` these are
+    /// accounts not worth suggesting, but for a renewal they are the whole
+    /// point -- "your token died" and "gh never knew this account" call for
+    /// completely different next steps.
+    pub failed_by_host: BTreeMap<String, Vec<String>>,
 }
 
 /// Read `gh auth status` for the accounts it holds.
@@ -323,18 +330,22 @@ pub fn gh_logins(runner: &dyn crate::sources::Runner) -> Logins {
             continue;
         }
 
-        // "Logged in to" and not "Failed to log in to". gh lists both, and
-        // suggesting an account it has just reported as broken would hand
-        // someone a config that cannot work -- observed on the author's machine,
-        // where one of three logins has an invalid token.
-        if !trimmed.contains("Logged in to") {
+        // gh lists both. Suggesting an account it has just reported as broken
+        // would hand someone a config that cannot work -- observed on the
+        // author's machine, where one of three logins has an invalid token.
+        let failed = trimmed.contains("Failed to log in to");
+        if !failed && !trimmed.contains("Logged in to") {
             continue;
         }
 
         if let (Some(host), Some(rest)) = (host.as_ref(), trimmed.split_once(" account ")) {
             // "✓ Logged in to github.com account NAME (keyring)"
             if let Some(name) = rest.1.split_whitespace().next() {
-                let names = logins.by_host.entry(host.clone()).or_default();
+                let names = if failed {
+                    logins.failed_by_host.entry(host.clone()).or_default()
+                } else {
+                    logins.by_host.entry(host.clone()).or_default()
+                };
                 if !names.iter().any(|n| n == name) {
                     names.push(name.to_string());
                 }

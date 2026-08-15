@@ -79,6 +79,7 @@ Now the part only you can do:
   1. edit ~/.config/gitwho/accounts.toml
      replace the example accounts with yours
   2. gitwho secret set <Account> <VAR>    once per token
+     (or `gitwho secret set --here`, from inside a repository that account owns)
   3. gitwho init --write                  re-run to finish
 ```
 
@@ -154,6 +155,55 @@ If `gh` cannot answer — not installed, or no such account — gitwho fails and
 names the account and variable. It never falls back to a stored value, because
 a stored value that disagrees with the tool is exactly the stale copy this
 avoids.
+
+### Renewing a token later
+
+A token expires, or you revoke one. From inside a repository the account owns:
+
+```sh
+gitwho renew
+```
+
+It resolves the account from the repository's remote, prints it with the reason
+it was chosen, and then handles each of the account's credentials according to
+where the value actually lives.
+
+For a **stored** value on a host `gh` serves, it does not ask you to go and find
+a token. `gh auth status` already reports whether its own token for an account
+works, so gitwho reads that and acts on it:
+
+- gh's token is good, and differs from what is stored → it shows both
+  fingerprints and offers to store gh's. One keypress.
+- gh's token is good and identical → `already current`, and nothing is written.
+- gh reports the token as no longer valid → it runs `gh auth login` for you,
+  with `GH_TOKEN` cleared and the shim skipped, then stores the result. That
+  clearing matters: gh refuses to save credentials while `GH_TOKEN` is set, and
+  gitwho's own shim is what sets it.
+- gh has logins but none named like the account → it lists them and asks which,
+  because the account may be named for the org rather than for the login, and
+  guessing would store somebody else's token.
+- gh knows nothing about the host, or is not installed → the hidden prompt, as
+  before.
+
+Since the account authenticated by `gh auth login` is chosen in the browser
+rather than by gitwho, it re-checks afterwards and refuses to store anything if
+the account you wanted is still not working.
+
+For a value declared `from = "gh"` nothing is stored here at all, because a copy
+would defeat the pointer — it prints the `gh auth login` to run, with the
+fingerprint of what the tool currently holds.
+
+`gitwho renew <VAR>` narrows it to one variable, `--paste` types the value in
+without consulting gh, and `--no-login` stops short of the browser.
+
+`gitwho whoami` answers the same resolution question without touching anything,
+and `gitwho whoami --quiet` prints just the account name for use in another
+command — failing rather than answering when nothing identified it, since a
+plausible wrong name is worse than no name.
+
+Both refuse to write against a repository no account claims. The declared
+default would accept the write and look healthy in `doctor` afterwards, which is
+the wrong-and-quiet failure (R8) rather than a convenience.
 
 **`init` is idempotent.** Re-run it after adding an account, or after moving the
 binary. Every step reports `ok` when there was nothing to do, so a second run

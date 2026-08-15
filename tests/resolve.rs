@@ -120,3 +120,20 @@ fn resolves_an_https_url_to_the_account_owning_that_org() {
     assert_eq!(resolved.account.name, "Work");
     assert_eq!(resolved.reason, Reason::UrlMatch);
 }
+
+#[test]
+fn every_reason_describes_itself_in_words_a_person_can_act_on() {
+    // These strings are printed next to an account name before a secret is
+    // written, so they have to distinguish "we found this" from "we guessed".
+    assert_eq!(Reason::UrlMatch.describe(), "matched a remote URL");
+    assert_eq!(Reason::OriginUrl.describe(), "matched the origin remote");
+    assert_eq!(
+        Reason::PathFallback.describe(),
+        "matched a directory prefix"
+    );
+    assert_eq!(
+        Reason::Unmatched.describe(),
+        "no account claims this remote"
+    );
+    assert_eq!(Reason::Default.describe(), "the declared default");
+}

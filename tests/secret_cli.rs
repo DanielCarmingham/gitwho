@@ -17,6 +17,14 @@ const ACCOUNTS: &str = r#"
     env = ["GH_TOKEN"]
 
     [[accounts]]
+    name = "TwoVars"
+    provider = "github"
+    email = "two@example.com"
+    gitCredential = "GH_TOKEN"
+    match = ["github.com/TwoVars/**"]
+    env = ["GH_TOKEN", "EXTRA_TOKEN"]
+
+    [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
     email = "you@example.net"
@@ -406,4 +414,210 @@ fn setting_an_undeclared_variable_warns_but_still_stores() {
             || err.to_lowercase().contains("does not declare"),
         "expected a warning about the undeclared variable; got: {err}"
     );
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("git should run");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+fn repo_with_origin(dir: &Path, origin: &str) {
+    git(dir, &["init", "-q", "-b", "main"]);
+    git(dir, &["remote", "add", "origin", origin]);
+}
+
+/// Like [`run_with_stdin`], but run from inside `cwd` -- which is what `--here`
+/// resolves against.
+fn run_in(dir: &Path, cwd: &Path, args: &[&str], input: &str) -> std::process::Output {
+    let mut child = gitwho(dir, args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn here_stores_under_the_account_the_repository_resolves_to() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/Personal/thing.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here"],
+        "tok-from-here\n",
+    );
+    assert!(
+        set.status.success(),
+        "set failed: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let list = run(dir.path(), &["secret", "list"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    let row = stdout
+        .lines()
+        .find(|line| line.starts_with("Personal"))
+        .expect("Personal should have a row");
+    assert!(
+        row.contains(&fingerprint("tok-from-here")),
+        "stored under the wrong account; got:\n{stdout}"
+    );
+}
+
+/// The account being written into is named before the value is asked for --
+/// the whole point is that you see it rather than recall it.
+#[test]
+fn here_says_which_account_it_resolved_and_why() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/Personal/thing.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here"],
+        "tok\n",
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&set.stdout),
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    assert!(combined.contains("Personal"), "{combined}");
+    assert!(combined.contains("matched the origin remote"), "{combined}");
+    assert!(combined.contains("GH_TOKEN"), "{combined}");
+}
+
+/// The R8 case: the declared default would accept the write and look healthy
+/// afterwards. Refusing is the only outcome that cannot be wrong.
+#[test]
+fn here_refuses_in_a_repository_no_account_claims() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/Stranger/theirs.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here"],
+        "tok-should-not-land\n",
+    );
+    let stderr = String::from_utf8_lossy(&set.stderr);
+
+    assert!(!set.status.success(), "should have refused");
+    assert!(stderr.contains("no account claims this remote"), "{stderr}");
+
+    let list = run(dir.path(), &["secret", "list"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        !stdout.contains(&fingerprint("tok-should-not-land")),
+        "a refused write still stored something:\n{stdout}"
+    );
+}
+
+#[test]
+fn here_requires_the_variable_when_the_account_declares_more_than_one() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/TwoVars/thing.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here"],
+        "tok\n",
+    );
+    let stderr = String::from_utf8_lossy(&set.stderr);
+
+    assert!(!set.status.success(), "should have refused to guess");
+    assert!(stderr.contains("GH_TOKEN"), "{stderr}");
+    assert!(stderr.contains("EXTRA_TOKEN"), "{stderr}");
+}
+
+#[test]
+fn here_takes_the_variable_when_it_is_given() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    run(dir.path(), &["secret", "init"]);
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/TwoVars/thing.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here", "EXTRA_TOKEN"],
+        "tok-extra\n",
+    );
+    assert!(
+        set.status.success(),
+        "set failed: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let list = run(dir.path(), &["secret", "list"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    let row = stdout
+        .lines()
+        .find(|line| line.contains("EXTRA_TOKEN"))
+        .expect("EXTRA_TOKEN should have a row");
+    assert!(row.contains(&fingerprint("tok-extra")), "{stdout}");
+}
+
+/// With `--here` the single positional is the variable, so an account name
+/// there is a mistake worth naming rather than silently treating as one.
+#[test]
+fn here_rejects_being_given_an_account_as_well() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/Personal/thing.git");
+
+    let set = run_in(
+        dir.path(),
+        repo.path(),
+        &["secret", "set", "--here", "Personal", "GH_TOKEN"],
+        "tok\n",
+    );
+    let stderr = String::from_utf8_lossy(&set.stderr);
+
+    assert!(!set.status.success());
+    assert!(stderr.contains("--here"), "{stderr}");
+}
+
+#[test]
+fn set_without_here_still_needs_both_the_account_and_the_variable() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+
+    let set = run_with_stdin(dir.path(), &["secret", "set", "Personal"], "tok\n");
+    let stderr = String::from_utf8_lossy(&set.stderr);
+
+    assert!(!set.status.success());
+    assert!(stderr.contains("--here"), "{stderr}");
 }

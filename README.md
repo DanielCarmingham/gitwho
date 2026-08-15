@@ -107,6 +107,7 @@ Then
 
 ```sh
 gitwho secret set Work GH_TOKEN    # once per token; the value never enters argv
+gitwho secret set --here          # or let the repository you are in name the account
 gitwho init --write                # finishes, and ends by running doctor
 ```
 
@@ -130,6 +131,9 @@ produce false passes.
 gitwho init          set everything up; safe to re-run
 gitwho init --discover <roots>   propose accounts.toml from repos on disk
 gitwho doctor        report whether the wiring is coherent (read-only)
+gitwho whoami        which account this repository resolves to, and why
+gitwho renew         bring this repository's credentials up to date,
+                     pulling from gh (or logging in) rather than asking you to
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
@@ -145,7 +149,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 186 tests, clippy clean.
+no longer exports a token per directory. 195 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

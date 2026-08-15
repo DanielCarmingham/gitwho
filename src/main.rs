@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use clap::{Parser, Subcommand};
 
-use gitwho::config::Config;
+use gitwho::config::{Account, Config};
 use gitwho::credential::{respond, Request};
 use gitwho::exec::plan_env;
 use gitwho::resolve::{resolve_repo, Reason};
@@ -81,6 +81,29 @@ enum Command {
     /// Report whether the wiring is coherent. Read-only; changes nothing.
     Doctor,
 
+    /// Bring this repository's credentials up to date.
+    ///
+    /// Stored values are prompted for; values that live in another tool are
+    /// not copied here -- it says where to renew them instead.
+    Renew {
+        /// Renew only this variable, instead of every one the account holds.
+        var: Option<String>,
+        /// Type the value in, without consulting the tool that may hold it.
+        #[arg(long)]
+        paste: bool,
+        /// Never start a login flow; fall back to typing the value instead.
+        #[arg(long)]
+        no_login: bool,
+    },
+
+    /// Say which account this repository resolves to, and why.
+    Whoami {
+        /// Print only the account name, and fail rather than answer when
+        /// nothing identified it.
+        #[arg(long)]
+        quiet: bool,
+    },
+
     /// Generate the git config that selects an identity per repository.
     ///
     /// Writes only into gitwho's own directory. Include it once from your
@@ -138,7 +161,17 @@ enum SecretAction {
     ///
     /// The value is never an argument: anything in argv is readable by every
     /// process on the machine through `ps`.
-    Set { account: String, var: String },
+    Set {
+        /// The account to store under. Replaced by `--here`.
+        account: Option<String>,
+        /// The variable to store. With `--here` this is the only positional,
+        /// and may be omitted when the account declares exactly one.
+        var: Option<String>,
+        /// Resolve the account from the repository in the current directory
+        /// instead of naming it.
+        #[arg(long)]
+        here: bool,
+    },
     /// Show every declared secret as a fingerprint, or as missing.
     List,
     /// Remove a stored value.
@@ -200,6 +233,24 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Renew {
+            var,
+            paste,
+            no_login,
+        } => match renew(var.as_deref(), paste, no_login) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitwho: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Whoami { quiet } => match whoami(quiet) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitwho: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Sync { dir, write } => match sync_config(dir, write) {
             Ok(code) => code,
             Err(message) => {
@@ -244,10 +295,16 @@ fn doctor_report() -> Result<ExitCode, String> {
     let backend = backend.as_ref();
 
     let ambient: std::collections::BTreeMap<String, String> = unicode_env().collect();
+    let cwd = std::env::current_dir().ok();
     let wiring = gitwho::doctor::GitWiring {
         credential_helpers: gitwho::git::credential_helpers(),
         github_helper: gitwho::git::credential_helper_for("https://github.com"),
         use_http_path: gitwho::git::use_http_path_for_github(),
+        // Where doctor was run decides which repository it can say anything
+        // about. Outside one, both of these read empty and the repo check has
+        // nothing to report -- which is the honest answer, not a silent skip.
+        remotes: cwd.as_deref().map(gitwho::git::remotes).unwrap_or_default(),
+        identity_pinned: cwd.as_deref().is_some_and(gitwho::git::identity_pinned),
     };
 
     // The directory is taken from the config's own parent rather than assumed
@@ -631,17 +688,9 @@ fn secret(action: SecretAction) -> Result<(), String> {
     match action {
         SecretAction::Init => unreachable!("handled above"),
 
-        SecretAction::Set { account, var } => {
-            // Catch a typo before it becomes a secret nothing ever reads --
-            // the symptom would otherwise surface later as a missing
-            // credential somewhere else entirely.
-            let declared = config.account(&account).ok_or_else(|| {
-                let known: Vec<&str> = config.accounts.iter().map(|a| a.name.as_str()).collect();
-                format!(
-                    "no account named {account:?}; accounts.toml declares: {}",
-                    known.join(", ")
-                )
-            })?;
+        SecretAction::Set { account, var, here } => {
+            let (declared, var) = set_target(&config, account, var, here)?;
+            let account = declared.name.clone();
 
             if !declared.secret_vars().contains(&var.as_str()) {
                 // A warning, not an error: the variable may be about to be
@@ -758,6 +807,106 @@ fn secret_init() -> Result<(), String> {
 /// On a terminal: a prompt naming what is being set, and hidden input that
 /// ends at Enter -- no invisible wait for a Ctrl-D nobody was told about. When
 /// piped, behaviour is unchanged, so scripts and the test suite are unaffected.
+/// The account owning the repository in the current directory, refused unless
+/// something actually identified it.
+///
+/// The declared default would accept a write and look healthy afterwards -- a
+/// credential present, decryptable and wrong (R8). Refusing is the only outcome
+/// that cannot be quietly incorrect, so every path that writes a secret against
+/// a resolution comes through here.
+fn account_here(config: &Config) -> Result<(&Account, Reason), String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let resolved = resolve_repo(config, &cwd).map_err(|e| e.to_string())?;
+
+    if !resolved.reason.identifies_an_account() {
+        return Err(format!(
+            "{}; name the account explicitly rather than storing a secret against a guess",
+            resolved.reason.describe()
+        ));
+    }
+
+    Ok((resolved.account, resolved.reason))
+}
+
+/// Which account and variable `secret set` is about to write, from either the
+/// named form or `--here`.
+///
+/// Split out because the two forms fail in different ways and each failure has
+/// to name its own fix: a misspelt account, an unclaimed repository, or an
+/// account with more than one variable to choose between.
+fn set_target(
+    config: &Config,
+    account: Option<String>,
+    var: Option<String>,
+    here: bool,
+) -> Result<(&Account, String), String> {
+    if !here {
+        let (Some(account), Some(var)) = (account, var) else {
+            return Err(
+                "give an account and a variable, or --here to resolve the account from \
+                 the repository you are in"
+                    .to_string(),
+            );
+        };
+        // Catch a typo before it becomes a secret nothing ever reads -- the
+        // symptom would otherwise surface later as a missing credential
+        // somewhere else entirely.
+        let declared = config.account(&account).ok_or_else(|| {
+            let known: Vec<&str> = config.accounts.iter().map(|a| a.name.as_str()).collect();
+            format!(
+                "no account named {account:?}; accounts.toml declares: {}",
+                known.join(", ")
+            )
+        })?;
+        return Ok((declared, var));
+    }
+
+    // Positionals fill in order, so with `--here` the first one is the
+    // variable. Two of them means the account was named as well, which is the
+    // one reading `--here` cannot also honour.
+    let named_var = match (account, var) {
+        (Some(_), Some(_)) => {
+            return Err(
+                "--here resolves the account from the repository; pass the variable only"
+                    .to_string(),
+            )
+        }
+        (first, second) => first.or(second),
+    };
+
+    let (declared, reason) = account_here(config)?;
+
+    let var = match named_var {
+        Some(var) => var,
+        None => {
+            let vars = declared.secret_vars();
+            match vars.as_slice() {
+                [only] => (*only).to_string(),
+                [] => {
+                    return Err(format!(
+                        "account {} stores no variables; nothing to set",
+                        declared.name
+                    ))
+                }
+                many => {
+                    return Err(format!(
+                        "account {} declares {}; say which one",
+                        declared.name,
+                        many.join(" and ")
+                    ))
+                }
+            }
+        }
+    };
+
+    println!(
+        "storing for {} ({}): {var}",
+        declared.name,
+        reason.describe()
+    );
+    Ok((declared, var))
+}
+
 fn read_value(account: &str, var: &str) -> Result<String, String> {
     use std::io::IsTerminal;
 
@@ -789,6 +938,368 @@ fn shim(action: ShimAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn renew(only: Option<&str>, paste: bool, no_login: bool) -> Result<ExitCode, String> {
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let (account, reason) = account_here(&config)?;
+
+    // Literals are excluded: they carry their own value in accounts.toml and
+    // there is nothing to renew about a hostname.
+    let mut vars: Vec<&str> = account.secret_vars();
+    for sourced in account.sourced_vars() {
+        if !vars.contains(&sourced.var.as_str()) {
+            vars.push(&sourced.var);
+        }
+    }
+
+    if let Some(wanted) = only {
+        if !vars.contains(&wanted) {
+            return Err(format!(
+                "account {} holds no variable {wanted:?}; it declares {}",
+                account.name,
+                vars.join(" and ")
+            ));
+        }
+        vars.retain(|var| *var == wanted);
+    }
+
+    if vars.is_empty() {
+        return Err(format!(
+            "account {} holds no credentials to renew",
+            account.name
+        ));
+    }
+
+    println!("{} ({})", account.name, reason.describe());
+
+    // Opened only if a stored variable turns up. An account whose values all
+    // live in other tools needs no store at all, and demanding one here would
+    // make that arrangement look broken.
+    let mut backend: Option<Box<dyn Backend>> = None;
+    let mut failed = false;
+
+    for var in vars {
+        println!();
+        match account.source_for(var) {
+            Some(sourced) => {
+                match gitwho::sources::fetch(&runner(), &account.name, sourced) {
+                    Ok(value) => println!(
+                        "{var}  read from {}, now {}",
+                        sourced.from,
+                        fingerprint(&value)
+                    ),
+                    Err(e) => {
+                        println!(
+                            "{var}  read from {}, and it cannot answer: {e}",
+                            sourced.from
+                        );
+                        failed = true;
+                    }
+                }
+                println!("      nothing is stored here, so there is nothing for gitwho to renew");
+                match renewal_command(sourced) {
+                    Some(command) => {
+                        println!("      renew it with: {command}");
+                        println!(
+                            "      then re-run `gitwho renew` -- the fingerprint should have moved"
+                        );
+                    }
+                    None => println!("      renew it wherever {} keeps it", sourced.from),
+                }
+            }
+            None => {
+                if backend.is_none() {
+                    let (opened, _) = open_backend(config.defaults.secret_backend.as_deref())?;
+                    backend = Some(opened);
+                }
+                let backend = backend.as_deref().expect("just opened");
+                let held = backend.get(&account.name, var).map_err(|e| e.to_string())?;
+
+                let value = if paste {
+                    Some(read_value(&account.name, var)?)
+                } else {
+                    match from_gh(account, var, held.as_deref(), no_login)? {
+                        Offer::Value(value) => Some(value),
+                        Offer::AlreadyCurrent => {
+                            println!("{var}  already current");
+                            continue;
+                        }
+                        Offer::Declined => {
+                            println!("{var}  nothing stored");
+                            continue;
+                        }
+                        Offer::Unavailable => Some(read_value(&account.name, var)?),
+                    }
+                };
+
+                let Some(value) = value else { continue };
+                backend
+                    .set(&account.name, var, &value)
+                    .map_err(|e| e.to_string())?;
+                println!("{var}  stored ({})", fingerprint(&value));
+            }
+        }
+    }
+
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// What consulting gh produced for one variable.
+enum Offer {
+    /// A value to store.
+    Value(String),
+    /// gh holds exactly what the store already does.
+    AlreadyCurrent,
+    /// gh could have answered and the user said no.
+    Declined,
+    /// gh has nothing to say here -- not installed, or a host it does not
+    /// serve. The caller falls back to asking the user to type the value.
+    Unavailable,
+}
+
+/// Get `var`'s new value out of gh, rather than out of the user.
+///
+/// gh already knows whether its own token works: `gh auth status` reports a
+/// dead one as "Failed to log in to" rather than listing it, which is what
+/// separates "this credential expired, log in again" from "gh never had an
+/// account by this name" -- two situations with completely different fixes.
+fn from_gh(
+    account: &Account,
+    var: &str,
+    held: Option<&str>,
+    no_login: bool,
+) -> Result<Offer, String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let Some(host) = gitwho::git::origin_url(&cwd)
+        .map(|url| gitwho::resolve::normalize(&url))
+        .and_then(|normalized| {
+            normalized
+                .split('/')
+                .next()
+                .filter(|host| !host.is_empty())
+                .map(str::to_string)
+        })
+    else {
+        return Ok(Offer::Unavailable);
+    };
+
+    let logins = gitwho::discover::gh_logins(&runner());
+    let working = logins.by_host.get(&host).cloned().unwrap_or_default();
+    let broken = logins
+        .failed_by_host
+        .get(&host)
+        .cloned()
+        .unwrap_or_default();
+
+    // gh serves neither this host nor anything else here: a self-hosted Forgejo,
+    // or no gh at all.
+    if working.is_empty() && broken.is_empty() {
+        return Ok(Offer::Unavailable);
+    }
+
+    let login = if working.iter().any(|name| name == &account.name) {
+        account.name.clone()
+    } else if broken.iter().any(|name| name == &account.name) {
+        println!(
+            "{var}  gh holds a login {} on {host}, and reports its token as no longer valid",
+            account.name
+        );
+        if no_login {
+            return Ok(Offer::Unavailable);
+        }
+        gh_login(&host)?;
+
+        // Which account was authenticated is decided in the browser, not here.
+        // Storing whatever gh hands over afterwards would be how the wrong
+        // account's token ends up under this one (R8).
+        let after = gitwho::discover::gh_logins(&runner());
+        if !after
+            .by_host
+            .get(&host)
+            .is_some_and(|names| names.iter().any(|name| name == &account.name))
+        {
+            return Err(format!(
+                "gh still has no working login for {} on {host}; nothing was stored",
+                account.name
+            ));
+        }
+        account.name.clone()
+    } else {
+        // The account is named for the org rather than for the gh login, so
+        // there is no safe guess -- one of these tokens belongs to somebody
+        // else entirely.
+        println!(
+            "{var}  gh has no login named {} on {host}, but it does have:",
+            account.name
+        );
+        for (index, name) in working.iter().enumerate() {
+            println!("      {}) {name}", index + 1);
+        }
+        print!("      pick one, or press Enter to type the value: ");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        let choice = read_line()?;
+        let Some(index) = choice.trim().parse::<usize>().ok() else {
+            return Ok(Offer::Unavailable);
+        };
+        match working.get(index.wrapping_sub(1)) {
+            Some(name) => name.clone(),
+            None => return Ok(Offer::Unavailable),
+        }
+    };
+
+    let sourced = gitwho::config::SourcedVar {
+        var: var.to_string(),
+        from: "gh".to_string(),
+        user: Some(login.clone()),
+        host: Some(host.clone()),
+    };
+    let value =
+        gitwho::sources::fetch(&runner(), &account.name, &sourced).map_err(|e| e.to_string())?;
+
+    if held == Some(value.as_str()) {
+        return Ok(Offer::AlreadyCurrent);
+    }
+
+    match held {
+        Some(old) => println!(
+            "{var}  gh holds {} for {login}; stored is {}",
+            fingerprint(&value),
+            fingerprint(old)
+        ),
+        None => println!(
+            "{var}  gh holds {} for {login}; nothing is stored yet",
+            fingerprint(&value)
+        ),
+    }
+    print!("      store it? [Y/n] ");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+
+    let answer = read_line()?;
+    if matches!(answer.trim(), "n" | "N" | "no" | "No") {
+        return Ok(Offer::Declined);
+    }
+
+    Ok(Offer::Value(value))
+}
+
+/// Hand the terminal to `gh auth login`.
+///
+/// Not a [`sources::Runner`] call: that captures output, and this is a flow the
+/// user drives -- a device code to read, a browser to approve in. `GH_TOKEN` is
+/// cleared because gh refuses to store credentials while it is set, and gitwho's
+/// own shim is what sets it; making the user discover that is the whole thing
+/// this command exists to stop.
+fn gh_login(host: &str) -> Result<(), String> {
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let gh = runner()
+        .resolve_in("gh", &path_var)
+        .ok_or_else(|| "gh is not on PATH".to_string())?;
+
+    println!("      starting `gh auth login --hostname {host}`");
+    let status = process::Command::new(gh)
+        .args(["auth", "login", "--hostname", host])
+        .env_remove("GH_TOKEN")
+        .env_remove("GITHUB_TOKEN")
+        .status()
+        .map_err(|e| format!("cannot run gh: {e}"))?;
+
+    if !status.success() {
+        return Err("gh auth login did not complete; nothing was stored".to_string());
+    }
+    Ok(())
+}
+
+fn read_line() -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|e| format!("cannot read a reply: {e}"))?;
+    Ok(line)
+}
+
+/// The command that renews a referenced value, for the tools where saying so is
+/// better than a shrug.
+///
+/// `None` for anything else: naming a command that does not exist would be
+/// worse than admitting the tool is not known here.
+fn renewal_command(sourced: &gitwho::config::SourcedVar) -> Option<String> {
+    if sourced.from != "gh" {
+        return None;
+    }
+
+    let mut command = String::from("gh auth login");
+    if let Some(host) = &sourced.host {
+        command.push_str(&format!(" --hostname {host}"));
+    }
+    if let Some(user) = &sourced.user {
+        command.push_str(&format!(" --user {user}"));
+    }
+    Some(command)
+}
+
+fn whoami(quiet: bool) -> Result<ExitCode, String> {
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let resolved = resolve_repo(&config, &cwd).map_err(|e| e.to_string())?;
+
+    // The two modes disagree about low confidence on purpose. The report is
+    // read by a person, who can see the reason line and judge it. `--quiet` is
+    // read by another command, where a plausible wrong name is the R8 failure
+    // with nothing left to notice it.
+    if quiet {
+        if !resolved.reason.identifies_an_account() {
+            return Err(format!(
+                "{}; not answering, because this would be pasted into another command",
+                resolved.reason.describe()
+            ));
+        }
+        println!("{}", resolved.account.name);
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let account = resolved.account;
+    println!("{:<12}{}", "account", account.name);
+    println!("{:<12}{}", "resolved", resolved.reason.describe());
+    println!("{:<12}{}", "email", account.email);
+    match &account.git_credential {
+        Some(var) => println!("{:<12}{var}", "credential"),
+        // Not a gap: an ssh-only account authenticates with a key and is not
+        // made to invent a token (R7).
+        None => println!("{:<12}none declared (ssh only)", "credential"),
+    }
+
+    if !account.env.is_empty() {
+        println!();
+        println!("{:<16}VALUE FROM", "VARIABLE");
+        for spec in &account.env {
+            let source = if spec.literal().is_some() {
+                "literal in accounts.toml".to_string()
+            } else if let Some(sourced) = spec.sourced() {
+                let mut who = format!("{} (read on demand", sourced.from);
+                if let Some(user) = &sourced.user {
+                    who.push_str(&format!(", user {user}"));
+                }
+                if let Some(host) = &sourced.host {
+                    who.push_str(&format!(", host {host}"));
+                }
+                who.push(')');
+                who
+            } else {
+                "stored".to_string()
+            };
+            println!("{:<16}{source}", spec.name());
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, String> {
