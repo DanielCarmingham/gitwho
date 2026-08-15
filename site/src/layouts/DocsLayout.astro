@@ -1,6 +1,9 @@
 ---
+import { readFileSync } from 'node:fs';
 import BaseLayout from './BaseLayout.astro';
 import { DOCS } from '../docs-map';
+import { RECIPES } from '../data/recipes';
+import { buildSearchDocuments, serializeSearchDocuments } from '../docs-search';
 
 interface Heading {
   depth: number;
@@ -20,11 +23,31 @@ const { title, headings, current } = Astro.props;
 // are already stripped by remark-strip-title, so depth starts at 2 in
 // practice; depth 4 is excluded to keep the list a map, not a mirror.
 const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const searchDocuments = buildSearchDocuments({
+  markdown: DOCS.map((doc) => ({ doc, raw: readFileSync(`../${doc.file}`, 'utf8') })),
+  configSource: readFileSync('../docs/accounts.toml.example', 'utf8'),
+  recipes: RECIPES,
+});
+const searchJson = serializeSearchDocuments(searchDocuments);
 ---
 
-<BaseLayout title={`${title} — gitwho docs`} description={`gitwho documentation: ${title}.`}>
+<BaseLayout title={`${title} — gitwho docs`} description={`gitwho documentation: ${title}.`} wide>
   <div class="docs">
     <nav class="docs__nav" aria-label="Documentation">
+      <div class="docs__search" role="search">
+        <label class="sr-only" for="docs-search">Search docs</label>
+        <input
+          id="docs-search"
+          class="docs__search-input"
+          type="search"
+          placeholder="search docs"
+          autocomplete="off"
+          spellcheck="false"
+          data-docs-search
+        />
+        <ul class="docs__search-results" data-docs-search-results aria-live="polite"></ul>
+      </div>
+
       <ul>
         {
           DOCS.map((doc) => (
@@ -57,7 +80,7 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
       </ul>
     </nav>
 
-    <div class="docs__content prose">
+    <div class="docs__content">
       <h1>{title}</h1>
       <slot />
     </div>
@@ -77,6 +100,79 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
       )
     }
   </div>
+
+  <script type="application/json" id="docs-search-index" set:html={searchJson} />
+
+  <script>
+    interface SearchDocument {
+      title: string;
+      href: string;
+      body: string;
+    }
+
+    const indexNode = document.getElementById('docs-search-index');
+    const input = document.querySelector<HTMLInputElement>('[data-docs-search]');
+    const results = document.querySelector<HTMLUListElement>('[data-docs-search-results]');
+    const documents = indexNode?.textContent
+      ? (JSON.parse(indexNode.textContent) as SearchDocument[])
+      : [];
+
+    function excerpt(body: string, query: string): string {
+      const lowerBody = body.toLowerCase();
+      const lowerQuery = query.toLowerCase();
+      const hit = lowerBody.indexOf(lowerQuery);
+      const start = Math.max(0, hit - 24);
+      const end = Math.min(body.length, (hit < 0 ? 0 : hit) + query.length + 42);
+      const prefix = start > 0 ? '...' : '';
+      const suffix = end < body.length ? '...' : '';
+
+      return `${prefix}${body.slice(start, end).trim()}${suffix}`;
+    }
+
+    function score(doc: SearchDocument, terms: string[]): number {
+      const title = doc.title.toLowerCase();
+      const body = doc.body.toLowerCase();
+
+      return terms.reduce((total, term) => {
+        if (title.includes(term)) return total + 8;
+        if (body.includes(term)) return total + 1;
+        return total;
+      }, 0);
+    }
+
+    input?.addEventListener('input', () => {
+      if (!results) return;
+
+      const query = input.value.trim();
+      const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+      results.replaceChildren();
+
+      if (terms.length === 0) return;
+
+      const matches = documents
+        .map((doc) => ({ doc, score: score(doc, terms) }))
+        .filter((match) => match.score > 0)
+        .sort((a, b) => b.score - a.score || a.doc.title.localeCompare(b.doc.title))
+        .slice(0, 3);
+
+      for (const { doc } of matches) {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        const title = document.createElement('span');
+        const summary = document.createElement('span');
+
+        link.href = doc.href;
+        title.className = 'docs__search-title';
+        title.textContent = doc.title;
+        summary.className = 'docs__search-excerpt';
+        summary.textContent = excerpt(doc.body, query);
+
+        link.append(title, summary);
+        item.append(link);
+        results.append(item);
+      }
+    });
+  </script>
 </BaseLayout>
 
 <style>
@@ -104,6 +200,58 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
     margin-top: var(--s2);
   }
 
+  .docs__search {
+    margin-bottom: var(--s5);
+  }
+
+  .docs__search-input {
+    width: 100%;
+    min-height: 2.35rem;
+    padding: 0.45rem 0.55rem;
+    border: var(--hair) solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+  }
+
+  .docs__search-input::placeholder {
+    color: var(--text-dim);
+  }
+
+  .docs__search-results {
+    margin-top: var(--s3);
+  }
+
+  .docs__search-results:empty {
+    display: none;
+  }
+
+  .docs__search-results li + li {
+    margin-top: var(--s3);
+  }
+
+  .docs__search-results a {
+    display: grid;
+    gap: var(--s1);
+  }
+
+  .docs__search-title {
+    color: var(--text);
+    font-weight: var(--w-medium);
+  }
+
+  .docs__search-excerpt {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--text-dim);
+    font-family: var(--font-sans);
+    font-size: var(--t-xs);
+    line-height: var(--lh-snug);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
   .docs__nav a,
   .docs__toc a {
     color: var(--text-dim);
@@ -129,19 +277,36 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
     margin-bottom: var(--s3);
   }
 
-  /* Content can be wider than --measure would suggest inside a narrow grid
-     track, so let the track govern width and keep the reading measure as an
-     upper bound rather than a fixed one. */
+  /* The docs body is a tool surface: prose stays readable, but code samples,
+     tables and config references can use the wider column. */
   .docs__content {
+    max-width: none;
+    min-width: 0;
+  }
+
+  .docs__content :global(:is(p, ul, ol, blockquote)) {
     max-width: var(--measure);
   }
 
-  /* Three columns once there is room for a fixed sidebar, a full measure and
-     a fixed TOC without either being crushed. Below that, one column: nav,
-     then content, then TOC — document order already gives this stacking. */
-  @media (min-width: 64rem) {
+  .docs__content :global(.prose) {
+    max-width: none;
+  }
+
+  .docs__content :global(.prose > :is(p, ul, ol, blockquote)) {
+    max-width: var(--measure);
+  }
+
+  .docs__content :global(.code),
+  .docs__content :global(pre),
+  .docs__content :global(.scroll-x) {
+    width: 100%;
+  }
+
+  /* Three columns once there is room for persistent navigation. The middle
+     track expands instead of pretending docs are only prose. */
+  @media (min-width: 76rem) {
     .docs {
-      grid-template-columns: 11rem minmax(0, var(--measure)) 11rem;
+      grid-template-columns: 13rem minmax(0, 1fr) 14rem;
       align-items: start;
     }
 

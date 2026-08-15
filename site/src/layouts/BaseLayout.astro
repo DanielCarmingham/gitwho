@@ -4,9 +4,10 @@ import '../styles/global.css';
 interface Props {
   title: string;
   description: string;
+  wide?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, wide = false } = Astro.props;
 
 // Derived from `site` in astro.config.ts rather than hard-coded, so the
 // canonical host is stated once. `site` is required for a static build here;
@@ -87,7 +88,7 @@ const repo = 'https://github.com/DanielCarmingham/gitwho';
       </div>
     </header>
 
-    <main id="content" class="shell main">
+    <main id="content" class:list={['shell', 'main', wide && 'shell--wide']}>
       <slot />
     </main>
 

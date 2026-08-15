@@ -90,6 +90,10 @@ video {
   padding-inline: var(--gutter);
 }
 
+.shell--wide {
+  max-width: 88rem;
+}
+
 /* Reading column. Opt-in, because diagrams and tables want the full shell. */
 .prose {
   max-width: var(--measure);
