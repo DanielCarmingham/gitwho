@@ -53,6 +53,21 @@ pub struct GitWiring {
     pub github_helper: Option<String>,
     /// `credential.useHttpPath` for github.com. `None` means unset.
     pub use_http_path: Option<bool>,
+    /// Every remote of the repository `doctor` was run from, as
+    /// `(name, url)`. Empty when the cwd is not a repository.
+    ///
+    /// Identity rules are generated as `includeIf
+    /// "hasconfig:remote.*.url:"`, which matches when *any* remote matches --
+    /// so a repo whose remotes belong to two accounts applies both rules and
+    /// git's last-include-wins settles it. That is a property of the repo, not
+    /// of the config, which is why the remotes have to come in here.
+    pub remotes: Vec<(String, String)>,
+    /// Whether the repository's own config already settles the identity -- a
+    /// local `user.email` or `include.path`.
+    ///
+    /// Local config beats every included global rule, so once this is true the
+    /// include order decides nothing and there is nothing left to report.
+    pub identity_pinned: bool,
 }
 
 /// Where the config and the secrets live, and who they should belong to.
@@ -118,6 +133,7 @@ pub fn run(
     check_secrets(config, backend, runner, &mut findings);
     check_ambient(config, ambient_env, &mut findings);
     check_git_wiring(git, &mut findings);
+    check_repo_identity(config, git, &mut findings);
 
     findings
 }
@@ -474,4 +490,80 @@ fn check_git_wiring(git: &GitWiring, findings: &mut Vec<Finding>) {
             "credential.useHttpPath is not true for github.com, so the org never reaches the helper and all GitHub accounts resolve identically".to_string(),
         )),
     }
+}
+
+/// Whether the repo `doctor` ran in has remotes claimed by more than one
+/// account, and if so which one git will actually pick.
+///
+/// The credentials axis handles this case correctly on its own -- the helper is
+/// asked per URL at transport time, so each remote authenticates as its own
+/// account. Identity does not: `includeIf "hasconfig:remote.*.url:"` matches
+/// when *any* remote matches, so every claiming account's rule applies and
+/// git's last-include-wins picks the one declared last. Measured on git 2.54.0
+/// (Apple Git-157); `hasconfig:remote.origin.url:` is not a supported keyword
+/// and silently never matches, so this cannot be fixed in the generated rules.
+///
+/// A warning rather than a problem: there is no single right answer for a repo
+/// that genuinely spans two accounts, and only the person who set it up knows
+/// which one should sign the commits. What is wrong is being told nothing (R8).
+fn check_repo_identity(config: &Config, git: &GitWiring, findings: &mut Vec<Finding>) {
+    // A local `user.email` or `include.path` beats every included global rule,
+    // so the question is already settled and there is nothing to report.
+    if git.identity_pinned {
+        return;
+    }
+
+    // Only remotes an account actually claims apply an identity rule. An
+    // unmatched one -- a third-party clone added as a remote -- competes with
+    // nothing, so it is not part of the conflict.
+    let claimed: Vec<(&str, &str)> = git
+        .remotes
+        .iter()
+        .filter_map(|(remote, url)| {
+            let resolved = crate::resolve::resolve_url(config, url).ok()?;
+            Some((remote.as_str(), resolved.account.name.as_str()))
+        })
+        .collect();
+
+    let mut accounts: Vec<&str> = Vec::new();
+    for (_, account) in &claimed {
+        if !accounts.contains(account) {
+            accounts.push(account);
+        }
+    }
+    if accounts.len() < 2 {
+        return;
+    }
+
+    // Declaration order is include order is precedence order: whichever of
+    // these accounts `accounts.toml` lists last has its rule applied last.
+    let Some(winner) = config
+        .accounts
+        .iter()
+        .rev()
+        .find(|a| accounts.contains(&a.name.as_str()))
+    else {
+        return;
+    };
+
+    let pairs: Vec<String> = claimed
+        .iter()
+        .map(|(remote, account)| format!("{remote} -> {account}"))
+        .collect();
+
+    findings.push(Finding::new(
+        Level::Warn,
+        "identity",
+        format!(
+            "this repo's remotes belong to {} accounts ({}); every matching account's \
+             identity rule applies and {} decides because it is declared last in \
+             accounts.toml -- not because it is origin. Pin the one you want with \
+             `git config --local include.path <gitwho's git dir>/{}.gitconfig`. \
+             Credentials are unaffected: each remote authenticates as its own account.",
+            accounts.len(),
+            pairs.join(", "),
+            winner.name,
+            winner.name,
+        ),
+    ));
 }

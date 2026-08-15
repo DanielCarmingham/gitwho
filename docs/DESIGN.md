@@ -287,8 +287,10 @@ makes failures loud instead of quiet.
    organisations are not order-sensitive. Two accounts tying on specificity is
    an **error**, not a coin flip.
 2. **No URL, cwd is a repo**: read `remote.origin.url` from git, then step 1.
-   Non-origin remotes are ignored for identity — a fork's `upstream` still
-   authenticates correctly at fetch time, because the helper resolves per-URL.
+   Non-origin remotes are ignored *here*, and a fork's `upstream` still
+   authenticates correctly at fetch time because the helper resolves per-URL.
+   The generated identity rules are a separate mechanism and do **not** ignore
+   them — see "A repo whose remotes span two accounts" under Known limits.
 3. **A repo with no `origin`**: longest-prefix match on the declared `paths`.
    Longest wins, so a nested root beats the root containing it without
    depending on declaration order.
@@ -408,6 +410,26 @@ the second is the one to act on.
 
   Covering it properly means generating that jj config from `accounts.toml` the
   way `sync` generates the gitconfig. Nothing here does that yet.
+
+- **A repo whose remotes span two accounts takes the wrong identity.**
+  Measured 2026-08-22 with git 2.54.0 (Apple Git-157). Credentials are fine:
+  the helper is asked per URL at transport time, so a github `origin` and a
+  gitea `upstream` each authenticate as their own account. Identity is not.
+  `sync` emits one `includeIf "hasconfig:remote.*.url:"` per account, and that
+  keyword matches when **any** remote matches — so both rules apply and git's
+  last-include-wins hands `user.email` and `core.sshcommand` to whichever
+  account `accounts.toml` declares last. Not to `origin`.
+
+  It cannot be fixed in the generated rules: `hasconfig:remote.origin.url:` is
+  not a supported keyword, and a rule using it silently never matches while the
+  same pattern under `remote.*.url` does. Both halves were measured on one
+  fixture repo with only the rule text changed.
+
+  So `doctor` reports it instead — a `warn`, because a repo that genuinely
+  spans two accounts has no single right answer and only the person who set it
+  up knows which should sign the commits. The finding names both accounts, says
+  which one wins and why, and stops once the repo pins its own identity with a
+  local `user.email` or `include.path`, which beats every included global rule.
 
 - **A GUI application launched outside a shell** — an editor started from the
   Dock — inherits no shim `PATH` and no environment. Git identity and git

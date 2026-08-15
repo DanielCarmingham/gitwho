@@ -38,3 +38,103 @@ fn a_trailing_reset_clears_everything() {
 
     assert!(effective_helpers(&configured).is_empty());
 }
+
+mod repo_facts {
+    use std::path::Path;
+    use std::process::Command;
+
+    use gitwho::git::{identity_pinned, remotes};
+
+    /// Hermetic: the developer's own global and system gitconfig are switched
+    /// off, so nothing here depends on the machine it runs on.
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git should run");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    #[test]
+    fn every_remote_is_listed_with_its_url() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+        git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/tool.git",
+            ],
+        );
+        git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "upstream",
+                "https://git.example.net/acme/tool.git",
+            ],
+        );
+
+        let mut found = remotes(dir.path());
+        found.sort();
+
+        assert_eq!(
+            found,
+            vec![
+                (
+                    "origin".to_string(),
+                    "https://github.com/acme/tool.git".to_string()
+                ),
+                (
+                    "upstream".to_string(),
+                    "https://git.example.net/acme/tool.git".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_repository_has_no_remotes() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert!(remotes(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_repo_that_sets_no_identity_of_its_own_is_not_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+
+        assert!(!identity_pinned(dir.path()));
+    }
+
+    #[test]
+    fn a_local_user_email_pins_the_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+        git(dir.path(), &["config", "user.email", "me@example.invalid"]);
+
+        assert!(identity_pinned(dir.path()));
+    }
+
+    #[test]
+    fn a_local_include_pins_the_identity() {
+        // The recommended fix for a repo spanning two accounts: include the
+        // account's generated gitconfig locally, where it beats every global
+        // rule.
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q", "-b", "main"]);
+        git(
+            dir.path(),
+            &["config", "include.path", "/somewhere/Personal.gitconfig"],
+        );
+
+        assert!(identity_pinned(dir.path()));
+    }
+}

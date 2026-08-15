@@ -47,6 +47,7 @@ fn healthy_wiring() -> GitWiring {
         credential_helpers: vec!["gitwho credential".to_string()],
         github_helper: Some("gitwho credential".to_string()),
         use_http_path: Some(true),
+        ..GitWiring::default()
     }
 }
 
@@ -206,6 +207,7 @@ fn github_without_use_http_path_is_a_problem() {
         credential_helpers: vec!["gitwho credential".to_string()],
         github_helper: Some("gitwho credential".to_string()),
         use_http_path: Some(false),
+        ..GitWiring::default()
     };
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
@@ -227,6 +229,7 @@ fn a_credential_helper_that_is_not_gitwho_is_a_problem() {
         credential_helpers: vec!["manager".to_string()],
         github_helper: None,
         use_http_path: Some(true),
+        ..GitWiring::default()
     };
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
@@ -371,6 +374,7 @@ fn a_url_scoped_helper_bypassing_gitwho_is_a_problem() {
         credential_helpers: vec!["gitwho credential".to_string()],
         github_helper: Some("!/opt/homebrew/bin/gh auth git-credential".to_string()),
         use_http_path: Some(true),
+        ..GitWiring::default()
     };
 
     let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
@@ -928,5 +932,130 @@ fn a_referenced_variable_sitting_in_the_environment_still_warns() {
         !warning.message.contains("gho_ambient"),
         "the value must never be printed: {}",
         warning.message
+    );
+}
+
+/// The two remotes a fork of a mirrored project has: one on each host, owned
+/// by different accounts.
+fn split_remotes() -> Vec<(String, String)> {
+    vec![
+        (
+            "origin".to_string(),
+            "https://github.com/Personal/tool.git".to_string(),
+        ),
+        (
+            "upstream".to_string(),
+            "ssh://git@ssh.git.example.net/acme/tool.git".to_string(),
+        ),
+    ]
+}
+
+fn identity_finding(findings: &[doctor::Finding]) -> Option<&doctor::Finding> {
+    findings.iter().find(|f| f.check == "identity")
+}
+
+#[test]
+fn remotes_owned_by_two_accounts_are_reported_with_the_one_that_wins() {
+    // `includeIf "hasconfig:remote.*.url:"` fires if *any* remote matches, so
+    // both accounts' rules apply and git's last-include-wins settles it --
+    // measured on git 2.54.0. The identity follows declaration order, not
+    // `origin`, and nothing else says so.
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let wiring = GitWiring {
+        remotes: split_remotes(),
+        ..healthy_wiring()
+    };
+
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+
+    let finding = identity_finding(&findings).expect("two accounts on one repo must be reported");
+    assert_eq!(finding.level, Level::Warn);
+    for expected in ["Personal", "SelfHosted", "origin", "upstream"] {
+        assert!(
+            finding.message.contains(expected),
+            "message must name {expected}: {}",
+            finding.message
+        );
+    }
+    // SelfHosted is declared second, so its include is applied last and wins.
+    assert!(
+        finding.message.contains("SelfHosted decides"),
+        "the winning account must be named as the one that decides: {}",
+        finding.message
+    );
+}
+
+#[test]
+fn a_repo_that_pins_its_own_identity_is_left_alone() {
+    // Once the repo settles the question locally, include order no longer
+    // decides anything -- and a warning that cannot be cleared is one people
+    // learn to scroll past.
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let wiring = GitWiring {
+        remotes: split_remotes(),
+        identity_pinned: true,
+        ..healthy_wiring()
+    };
+
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+
+    assert!(
+        identity_finding(&findings).is_none(),
+        "a pinned repo is not ambiguous: {:?}",
+        identity_finding(&findings)
+    );
+}
+
+#[test]
+fn several_remotes_owned_by_one_account_are_not_ambiguous() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let wiring = GitWiring {
+        remotes: vec![
+            (
+                "origin".to_string(),
+                "https://github.com/Personal/tool.git".to_string(),
+            ),
+            (
+                "fork".to_string(),
+                "https://github.com/Personal/tool-fork.git".to_string(),
+            ),
+        ],
+        ..healthy_wiring()
+    };
+
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+
+    assert!(
+        identity_finding(&findings).is_none(),
+        "one account cannot conflict with itself: {:?}",
+        identity_finding(&findings)
+    );
+}
+
+#[test]
+fn an_unclaimed_remote_alongside_a_claimed_one_is_not_an_identity_conflict() {
+    // A third-party clone added as a remote matches no account, so it applies
+    // no identity rule and cannot compete with one.
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let wiring = GitWiring {
+        remotes: vec![
+            (
+                "origin".to_string(),
+                "https://github.com/Personal/tool.git".to_string(),
+            ),
+            (
+                "vendor".to_string(),
+                "https://github.com/some-stranger/tool.git".to_string(),
+            ),
+        ],
+        ..healthy_wiring()
+    };
+
+    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+
+    assert!(
+        identity_finding(&findings).is_none(),
+        "an unmatched remote claims no identity: {:?}",
+        identity_finding(&findings)
     );
 }
