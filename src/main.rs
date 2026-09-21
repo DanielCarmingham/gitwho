@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 
 use gitwho::config::{Account, Config};
 use gitwho::credential::{respond, Request};
-use gitwho::exec::plan_env;
+use gitwho::exec::{plan_cleared, plan_env};
 use gitwho::resolve::{resolve_repo, Reason};
 use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
 use gitwho::secrets::{
@@ -1304,6 +1304,24 @@ fn whoami(quiet: bool) -> Result<ExitCode, String> {
 
 fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+
+    let (program, args) = command.split_first().expect("clap requires a command");
+
+    // Checked before anything else, and before an account is resolved at all.
+    // A command that establishes a credential is how an account with nothing
+    // stored gets one, so failing it for the missing secret would close the
+    // only door out of that state.
+    if gitwho::shim::establishes_credentials(program, args) {
+        eprintln!(
+            "gitwho: {} establishes credentials, so no token was injected",
+            std::path::Path::new(program)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(program)
+        );
+        return run_with(program, args, &plan_cleared(&config));
+    }
+
     let (backend, _) = open_backend(config.defaults.secret_backend.as_deref())?;
     let backend = backend.as_ref();
 
@@ -1331,8 +1349,15 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
     };
 
     let plan = plan_env(&config, backend, &runner(), account).map_err(|e| e.to_string())?;
+    run_with(program, args, &plan)
+}
 
-    let (program, args) = command.split_first().expect("clap requires a command");
+/// Run `program` with the environment `plan` describes.
+fn run_with(
+    program: &str,
+    args: &[String],
+    plan: &gitwho::exec::EnvPlan,
+) -> Result<ExitCode, String> {
     let mut child = process::Command::new(program);
     child.args(args);
 

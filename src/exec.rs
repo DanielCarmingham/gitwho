@@ -34,6 +34,19 @@ pub struct EnvPlan {
 ///
 /// Returns a plan rather than mutating anything, so the decision can be tested
 /// without spawning a process and inspected by `doctor` without running one.
+/// The plan for a command that must not be handed a credential: clear
+/// everything any account manages, set nothing.
+///
+/// Clearing still happens, because stepping aside means injecting nothing --
+/// not letting whatever the shell already exported through to a tool that would
+/// then authenticate as it (R11).
+pub fn plan_cleared(config: &Config) -> EnvPlan {
+    EnvPlan {
+        remove: managed_variables(config),
+        set: BTreeMap::new(),
+    }
+}
+
 pub fn plan_env(
     config: &Config,
     backend: &dyn Backend,

@@ -171,3 +171,80 @@ fn installing_the_same_shim_twice_reports_the_second_as_unchanged() {
     );
     assert_eq!(first.path, second.path);
 }
+
+mod establishes_credentials {
+    use gitwho::shim::establishes_credentials;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The case this exists for: a token in the environment is exactly what
+    /// stops `gh auth login` from storing one.
+    #[test]
+    fn gh_auth_login_must_not_see_an_injected_token() {
+        assert!(establishes_credentials("gh", &args(&["auth", "login"])));
+    }
+
+    /// The shim runs the real binary by absolute path, so matching the whole
+    /// string would never fire where it matters.
+    #[test]
+    fn the_program_is_matched_by_its_file_name_not_its_path() {
+        assert!(establishes_credentials(
+            "/opt/homebrew/bin/gh",
+            &args(&["auth", "login"])
+        ));
+        assert!(establishes_credentials(
+            "C:\\Program Files\\GitHub CLI\\gh.exe",
+            &args(&["auth", "login"])
+        ));
+    }
+
+    #[test]
+    fn flags_around_the_subcommand_do_not_hide_it() {
+        assert!(establishes_credentials(
+            "gh",
+            &args(&["auth", "login", "--hostname", "github.com"])
+        ));
+        assert!(establishes_credentials(
+            "gh",
+            &args(&["--verbose", "auth", "login"])
+        ));
+    }
+
+    #[test]
+    fn the_other_credential_establishing_subcommands_are_covered() {
+        for sub in [
+            vec!["auth", "logout"],
+            vec!["auth", "refresh"],
+            vec!["auth", "switch"],
+            vec!["auth", "setup-git"],
+        ] {
+            assert!(
+                establishes_credentials("gh", &args(&sub)),
+                "{sub:?} should pass through"
+            );
+        }
+        assert!(establishes_credentials("tea", &args(&["login", "add"])));
+        assert!(establishes_credentials("tea", &args(&["logout"])));
+    }
+
+    /// Everything else is the ordinary case, and must still be given the
+    /// account's credentials -- that is the whole point of the shim.
+    #[test]
+    fn ordinary_commands_are_untouched() {
+        assert!(!establishes_credentials("gh", &args(&["pr", "list"])));
+        assert!(!establishes_credentials("gh", &args(&["auth", "status"])));
+        assert!(!establishes_credentials("gh", &args(&["auth", "token"])));
+        assert!(!establishes_credentials("gh", &args(&[])));
+        assert!(!establishes_credentials("tea", &args(&["pr", "list"])));
+    }
+
+    /// A tool gitwho knows nothing about gets the normal treatment, including
+    /// one that merely happens to have a subcommand spelled the same way.
+    #[test]
+    fn an_unknown_program_is_never_passed_through() {
+        assert!(!establishes_credentials("git", &args(&["auth", "login"])));
+        assert!(!establishes_credentials("glab", &args(&["auth", "login"])));
+    }
+}

@@ -53,6 +53,66 @@ const WINDOWS_EXTENSIONS: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
 /// On Windows, `PATHEXT` resolves `gh.exe` or `gh.cmd` and never an
 /// extensionless file, so a shim written as plain `gh` would sit on `PATH`
 /// being ignored.
+/// Argument prefixes that must never run with an injected credential, per tool.
+///
+/// These are the commands whose *purpose* is to establish a credential. Handing
+/// one a token does not help it: `gh auth login` refuses outright while
+/// `GH_TOKEN` is set, which through a shim makes a brand-new account
+/// impossible to set up at all.
+///
+/// Tool knowledge, so it lives here beside the rest of it rather than inside a
+/// generic `exec`. It can go stale when a tool gains a subcommand; the failure
+/// mode when it does is the tool's own error, not a silently wrong account.
+const ESTABLISHES_CREDENTIALS: &[(&str, &[&[&str]])] = &[
+    (
+        "gh",
+        &[
+            &["auth", "login"],
+            &["auth", "logout"],
+            &["auth", "refresh"],
+            &["auth", "switch"],
+            &["auth", "setup-git"],
+        ],
+    ),
+    ("tea", &[&["login", "add"], &["logout"]]),
+];
+
+/// Whether running `program` with `args` is an attempt to establish a
+/// credential, rather than to use one.
+///
+/// `program` is matched by file name: the shim runs the real binary by absolute
+/// path, so anything stricter would never fire where it matters. Arguments are
+/// matched ignoring flags, so a global flag before the subcommand cannot hide
+/// it.
+pub fn establishes_credentials(program: &str, args: &[String]) -> bool {
+    // Both separators, deliberately: `Path` on unix does not treat a backslash
+    // as one, so a Windows path would arrive here as a single long file name
+    // and match nothing. Keeping this a pure function of the string is what
+    // makes the Windows case reachable from a test run on macOS.
+    let file = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let name = WINDOWS_EXTENSIONS
+        .iter()
+        .find_map(|ext| file.strip_suffix(ext))
+        .unwrap_or(file);
+
+    let Some((_, prefixes)) = ESTABLISHES_CREDENTIALS
+        .iter()
+        .find(|(tool, _)| *tool == name)
+    else {
+        return false;
+    };
+
+    let words: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|arg| !arg.starts_with('-'))
+        .collect();
+
+    prefixes
+        .iter()
+        .any(|prefix| words.len() >= prefix.len() && words[..prefix.len()] == **prefix)
+}
+
 pub fn shim_file_name(name: &str, target: ShimTarget) -> String {
     match target {
         ShimTarget::Posix => name.to_string(),

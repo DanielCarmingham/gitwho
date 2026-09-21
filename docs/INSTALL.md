@@ -350,6 +350,22 @@ Then that directory has to come early on `PATH`. On zsh this belongs at the
 export PATH="$HOME/.local/share/gitwho/shims:$PATH"
 ```
 
+**Logging in still works through a shim.** A command whose purpose is to
+establish a credential is never handed one: `gh auth login`, `logout`,
+`refresh`, `switch` and `setup-git`, and `tea login add` and `logout`, run with
+every managed variable cleared and nothing injected. gitwho says so on stderr
+rather than doing it silently.
+
+That matters twice over. gh refuses to store credentials at all while
+`GH_TOKEN` is set, and the shim is what sets it -- so without this, a shimmed
+`gh auth login` could never succeed, in any directory. And an account declared
+in `accounts.toml` but never used has nothing stored yet, which the ordinary
+path reports as a missing secret; logging in is how you fix that, so it is the
+one thing that must not be blocked by it.
+
+Clearing still happens. Stepping aside means injecting nothing, not letting a
+token the shell already exported reach a tool that would authenticate as it.
+
 `.zshenv` looks like the right place and is not. `.zshrc` then prepends a dozen
 or more entries of its own — Homebrew among them — so anything set in `.zshenv`
 ends up buried and the real `gh` wins. Keep a copy in `.zshenv` as well, since
