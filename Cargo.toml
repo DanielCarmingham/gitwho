@@ -1,6 +1,6 @@
 [package]
 name = "gitwho"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Pick the right git identity and credentials for a repository, automatically, wherever it lives on disk"
 license = "MIT"
