@@ -265,3 +265,24 @@ fn several_remotes_owned_by_one_account_do_not_raise_a_conflict() {
         "reported a conflict where there is none:\n{stdout}"
     );
 }
+
+/// Both halves of what ends up on a commit, from git rather than from the
+/// config -- showing one and not the other was arbitrary.
+#[test]
+fn the_name_is_reported_alongside_the_email_and_both_come_from_git() {
+    let config = tempfile::tempdir().unwrap();
+    setup(config.path());
+    let repo = tempfile::tempdir().unwrap();
+    repo_with_origin(repo.path(), "https://github.com/Personal/thing.git");
+    git(repo.path(), &["config", "user.name", "Pinned Person"]);
+    git(
+        repo.path(),
+        &["config", "user.email", "pinned@example.test"],
+    );
+
+    let out = whoami(config.path(), repo.path(), &[]);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+
+    assert!(stdout.contains("Pinned Person"), "{stdout}");
+    assert!(stdout.contains("pinned@example.test"), "{stdout}");
+}

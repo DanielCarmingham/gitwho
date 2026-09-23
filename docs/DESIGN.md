@@ -25,6 +25,47 @@ when they do you commit as one person while authenticating as another.
 
 ---
 
+## Terminology
+
+"Identity" carries three unrelated meanings around this project, each correct in
+its own vocabulary. They are worth separating once.
+
+| Term | Means | Set by |
+|---|---|---|
+| **git identity** | `user.name`, `user.email` and `core.sshcommand` | the generated per-account gitconfig, included per remote URL |
+| **age identity** | the private key that decrypts the secret store, in `identity.key` | `gitwho secret init` |
+| **credential** | a token: git's https password, or what a CLI authenticates as | the store, or the tool a variable references |
+
+The collision is not sloppiness. "Identity" is [age][age]'s own word for a
+private key, and git's own word for commit authorship. Nothing is renamed here
+to avoid it, because each name is right where it is used; this table exists so
+the overlap can be read rather than guessed at.
+
+[age]: https://github.com/FiloSottile/age
+
+**The ssh key sits on the identity axis while being a credential in every
+ordinary sense.** That is forced, not chosen. `core.sshcommand` can only be
+delivered per-remote through a config include, which *is* the identity
+mechanism, and a credential helper is only ever consulted for https. So there is
+nowhere else to put it.
+
+The consequence is worth stating plainly, because it decides how bad a wrong
+answer is:
+
+- On an **https** remote the axes are independent. Identity writes the author
+  into the commit; a token authenticates the push. A wrong identity gives you
+  correctly-authenticated commits with the wrong author in your history, and
+  nothing fails.
+- On an **ssh** remote identity *is* the authentication, since it names the key,
+  and no token is involved at all (R7). A wrong identity usually fails at the
+  server instead of landing quietly in history.
+
+`gitCredential` and the entries in `env` name **variables**, never values (R10).
+A variable so named is not itself the credential; it is where the credential
+will be found — in the store, or in the tool the entry points at.
+
+---
+
 ## Evidence
 
 ### Path rules break on relocation, silently

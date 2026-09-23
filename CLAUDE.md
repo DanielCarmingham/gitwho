@@ -105,6 +105,11 @@ marking a task active when work on it *starts*, not only when it finishes.
 Two independent axes. Keying either on filesystem path is the bug this project
 exists to fix.
 
+"Identity" means three unrelated things around here — git authorship, age's
+private key, and credentials generally. `docs/DESIGN.md` has a Terminology table
+separating them, including why the ssh key sits on the identity axis despite
+being a credential in every ordinary sense.
+
 | Axis | Decides | Keyed on |
 |---|---|---|
 | **git identity** | author name/email, ssh key | remote URL, via `includeIf "hasconfig:remote.*.url:"` |
@@ -202,3 +207,19 @@ gitwho doctor                           # read-only; exits non-zero on problems
 
 `doctor` is the integration check. It never prints a secret value, so its
 output is safe to paste.
+
+**`cargo build` can leave `target/debug/gitwho` stale, silently.** Observed
+twice on 2026-09-23. The compile succeeds and writes a fresh
+`target/debug/deps/gitwho-<hash>`, but the uplift to the named path is skipped
+because the build-profile fingerprint claims it is current -- `cargo build`
+reports "Finished in 0.07s" even right after `touch src/main.rs`, and deleting
+the binary recreates it with the *old* mtime from a cached artifact.
+
+It is nastier than it sounds, because `cargo test` builds its own copy: the
+test suite exercises the new code and passes while anything running the named
+binary shows the old behaviour. Library changes appear and binary changes do
+not, so `doctor` and `whoami` disagreed in the same invocation.
+
+Check `stat -f "%Sm" target/debug/gitwho` against the source before trusting a
+manual run, and fix it with `cargo clean -p gitwho`. Releases are unaffected:
+`cargo publish` and `dist build` compile from their own directories.

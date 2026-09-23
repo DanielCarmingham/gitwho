@@ -115,6 +115,47 @@ pub fn normalize(url: &str) -> String {
     rest.trim_end_matches('/').to_string()
 }
 
+/// Every way git might spell a remote matching `host/path`.
+///
+/// `hasconfig:remote.*.url:` compares against the literal remote string, so a
+/// single `host/org/**` pattern has to be expanded. Missing a form is silent:
+/// an ssh clone of a matched org would simply not match, and fall back to the
+/// default identity.
+pub fn url_forms(pattern: &str) -> Vec<String> {
+    let Some((host, rest)) = pattern.split_once('/') else {
+        return vec![pattern.to_string()];
+    };
+
+    vec![
+        format!("https://{host}/{rest}"),
+        // An https remote may carry userinfo -- `https://someone@host/...`, or
+        // a token pasted into the URL. `hasconfig` compares against the literal
+        // remote string, so the plain form above does not match those at all,
+        // and the repo silently falls through to a directory rule or the
+        // default identity. Measured on git 2.54.0 (Apple Git-157): this form
+        // matches both `user@` and `user:token@`, and does *not* match a URL
+        // without userinfo -- so both spellings are required, not one.
+        format!("https://*@{host}/{rest}"),
+        // scp-style. The user is wildcarded because it is not always `git`:
+        // a Gitea host serves `gitea@host:org/repo.git`, and a literal `git@`
+        // pattern misses it silently -- the repo simply falls back to the
+        // default identity. Verified against git 2.50.1 that `*@`
+        // matches while a bare `*host*` does not, since `*` will not cross a
+        // path separator.
+        format!("*@{host}:{rest}"),
+        // Both spellings, because `**` only spans separators when it follows
+        // one. Directly after the `:` it degrades to a single `*`, so a
+        // host-wide pattern (`host/**`) needs the `:*/` form to reach
+        // `org/repo`. Measured, not assumed: `host:**` does not match while
+        // `host:*/**` does. The redundant one is harmless for patterns that
+        // already name an org.
+        format!("*@{host}:*/{rest}"),
+        format!("ssh://*@{host}/{rest}"),
+        // ssh URLs need not carry a user at all.
+        format!("ssh://{host}/{rest}"),
+    ]
+}
+
 /// Which accounts claim a repo's remotes, and which one's identity rule wins.
 ///
 /// The two axes answer differently and this is the only place that says so.
@@ -134,12 +175,26 @@ pub struct Claimants<'a> {
 }
 
 /// Work out [`Claimants`] for a set of `(remote, url)` pairs.
+///
+/// Matching is done the way *git* does it: the raw URL against the patterns
+/// [`url_forms`] emits, not the normalised URL against the account's `match`
+/// entries. The two differ -- normalisation strips userinfo while
+/// `hasconfig:remote.*.url:` compares the literal string -- and predicting
+/// identity from the wrong one reports conflicts git will never have.
 pub fn claimants<'a>(config: &'a Config, remotes: &[(String, String)]) -> Claimants<'a> {
     let claimed: Vec<(String, &Account)> = remotes
         .iter()
         .filter_map(|(remote, url)| {
-            let resolved = resolve_url(config, url).ok()?;
-            Some((remote.clone(), resolved.account))
+            let account = config.accounts.iter().find(|account| {
+                account.match_patterns.iter().any(|pattern| {
+                    url_forms(pattern).iter().any(|form| {
+                        globset::Glob::new(form)
+                            .map(|glob| glob.compile_matcher().is_match(url))
+                            .unwrap_or(false)
+                    })
+                })
+            })?;
+            Some((remote.clone(), account))
         })
         .collect();
 

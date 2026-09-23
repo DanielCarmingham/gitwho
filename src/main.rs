@@ -1269,10 +1269,14 @@ fn whoami(quiet: bool) -> Result<ExitCode, String> {
     println!("{:<12}{}", "account", account.name);
     println!("{:<12}{}", "resolved", resolved.reason.describe());
 
-    // Git's own answer, not the config's. They agree in the ordinary case;
+    // Git's own answers, not the config's. They agree in the ordinary case;
     // where they do not, what git will actually sign commits with is the only
-    // useful thing to print.
-    match gitwho::git::effective_email(&cwd) {
+    // useful thing to print. Both halves, because both land on the commit.
+    match gitwho::git::effective(&cwd, "user.name") {
+        Some(name) => println!("{:<12}{name}", "name"),
+        None => println!("{:<12}not set by git", "name"),
+    }
+    match gitwho::git::effective(&cwd, "user.email") {
         Some(email) => println!("{:<12}{email}", "email"),
         None => println!("{:<12}{} (from accounts.toml)", "email", account.email),
     }

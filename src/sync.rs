@@ -187,7 +187,7 @@ fn includes_file(config: &Config, dir: &Path) -> String {
     out.push_str("# anywhere and for a worktree in a foreign root.\n");
     for account in &config.accounts {
         for pattern in &account.match_patterns {
-            for url in url_forms(pattern) {
+            for url in crate::resolve::url_forms(pattern) {
                 out.push_str(&format!("[includeIf \"hasconfig:remote.*.url:{url}\"]\n"));
                 out.push_str(&format!(
                     "\tpath = {}\n",
@@ -198,39 +198,6 @@ fn includes_file(config: &Config, dir: &Path) -> String {
     }
 
     out
-}
-
-/// Every way git might spell a remote matching `host/path`.
-///
-/// `hasconfig:remote.*.url:` compares against the literal remote string, so a
-/// single `host/org/**` pattern has to be expanded. Missing a form is silent:
-/// an ssh clone of a matched org would simply not match, and fall back to the
-/// default identity.
-fn url_forms(pattern: &str) -> Vec<String> {
-    let Some((host, rest)) = pattern.split_once('/') else {
-        return vec![pattern.to_string()];
-    };
-
-    vec![
-        format!("https://{host}/{rest}"),
-        // scp-style. The user is wildcarded because it is not always `git`:
-        // a Gitea host serves `gitea@host:org/repo.git`, and a literal `git@`
-        // pattern misses it silently -- the repo simply falls back to the
-        // default identity. Verified against git 2.50.1 that `*@`
-        // matches while a bare `*host*` does not, since `*` will not cross a
-        // path separator.
-        format!("*@{host}:{rest}"),
-        // Both spellings, because `**` only spans separators when it follows
-        // one. Directly after the `:` it degrades to a single `*`, so a
-        // host-wide pattern (`host/**`) needs the `:*/` form to reach
-        // `org/repo`. Measured, not assumed: `host:**` does not match while
-        // `host:*/**` does. The redundant one is harmless for patterns that
-        // already name an org.
-        format!("*@{host}:*/{rest}"),
-        format!("ssh://*@{host}/{rest}"),
-        // ssh URLs need not carry a user at all.
-        format!("ssh://{host}/{rest}"),
-    ]
 }
 
 /// Write the plan, returning the paths that actually changed.
