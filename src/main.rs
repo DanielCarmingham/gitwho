@@ -43,7 +43,7 @@ Examples:
 #[derive(Parser)]
 #[command(
     name = "gitwho",
-    version,
+    version = env!("GITWHO_VERSION"),
     about = "Per-repository git identity and credentials"
 )]
 struct Cli {

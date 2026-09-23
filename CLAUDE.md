@@ -187,8 +187,16 @@ Choices worth not re-litigating:
 - **`install-path = "CARGO_HOME"`** so the shell installer, `cargo install` and
   `cargo binstall` all land in `~/.cargo/bin`. Two routes disagreeing about
   where the binary went is a support question we can simply not have.
-- **gnu, not musl.** No `build.rs`, no C dependencies. Add
-  `x86_64-unknown-linux-musl` if a `GLIBC_2.xx not found` report appears.
+- **gnu, not musl.** No C dependencies; the only `build.rs` is pure Rust and
+  shells out to nothing but `git`. Add `x86_64-unknown-linux-musl` if a
+  `GLIBC_2.xx not found` report appears.
+- **`--version` says whether it is a release.** `build.rs` prints plain
+  `X.Y.Z` only when the source has no `.git` beside `Cargo.toml` (the crates.io
+  tarball) or `GITHUB_REF` is exactly `refs/tags/vX.Y.Z` (dist's tag-push
+  jobs). Everything else, including a local build of the release commit, is
+  `X.Y.Z-dev+<commit>`. So `dist build` and `cargo install --path .` locally
+  report dev, which is correct. After tagging, check a downloaded artifact
+  prints the bare version.
 - **A personal tap, not homebrew-core**, which has stars/forks thresholds this
   is nowhere near.
 - **`[package.metadata.binstall]` in `Cargo.toml` is load-bearing.** Without
@@ -200,7 +208,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 256 pass, 1 ignored
+cargo test                              # 257 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```
@@ -219,6 +227,16 @@ It is nastier than it sounds, because `cargo test` builds its own copy: the
 test suite exercises the new code and passes while anything running the named
 binary shows the old behaviour. Library changes appear and binary changes do
 not, so `doctor` and `whoami` disagreed in the same invocation.
+
+One trigger is reproduced (2026-09-25): `cargo package`, and therefore
+`cargo publish --dry-run`, verifies the tarball in this same target dir under
+the same unit fingerprint as a checkout build. The next plain `cargo build`
+then finishes in 0.07s holding the *packaged* build's binary. It generalises:
+two source trees of the same package version sharing one `CARGO_TARGET_DIR`
+reuse each other's artifacts, so testing a second copy that way silently
+re-runs the first copy's tests (seen 2026-09-26). `build.rs` now defends its
+own output against this, and `gitwho --version` showing no `-dev` suffix on a
+local build is the tell.
 
 Check `stat -f "%Sm" target/debug/gitwho` against the source before trusting a
 manual run, and fix it with `cargo clean -p gitwho`. Releases are unaffected:
