@@ -115,6 +115,57 @@ pub fn normalize(url: &str) -> String {
     rest.trim_end_matches('/').to_string()
 }
 
+/// Which accounts claim a repo's remotes, and which one's identity rule wins.
+///
+/// The two axes answer differently and this is the only place that says so.
+/// Credentials are settled per remote, because the helper is asked per URL at
+/// transport time. Identity is not: `includeIf "hasconfig:remote.*.url:"`
+/// matches when *any* remote matches, so every claimant's rule applies and
+/// git's last-include-wins picks whichever `accounts.toml` declares last --
+/// not `origin`.
+#[derive(Debug)]
+pub struct Claimants<'a> {
+    /// Each remote an account claims, as `(remote name, account)`. A remote
+    /// nobody claims competes with nothing and is left out.
+    pub claimed: Vec<(String, &'a Account)>,
+    /// The account whose identity rule applies last, when more than one
+    /// account claims a remote. `None` when there is no contest to settle.
+    pub identity_winner: Option<&'a Account>,
+}
+
+/// Work out [`Claimants`] for a set of `(remote, url)` pairs.
+pub fn claimants<'a>(config: &'a Config, remotes: &[(String, String)]) -> Claimants<'a> {
+    let claimed: Vec<(String, &Account)> = remotes
+        .iter()
+        .filter_map(|(remote, url)| {
+            let resolved = resolve_url(config, url).ok()?;
+            Some((remote.clone(), resolved.account))
+        })
+        .collect();
+
+    let mut names: Vec<&str> = Vec::new();
+    for (_, account) in &claimed {
+        if !names.contains(&account.name.as_str()) {
+            names.push(&account.name);
+        }
+    }
+
+    let identity_winner = (names.len() > 1)
+        .then(|| {
+            config
+                .accounts
+                .iter()
+                .rev()
+                .find(|a| names.contains(&a.name.as_str()))
+        })
+        .flatten();
+
+    Claimants {
+        claimed,
+        identity_winner,
+    }
+}
+
 /// Resolve the account owning the repo that contains `dir`.
 ///
 /// Only `origin` is consulted. A fork whose `upstream` belongs to another

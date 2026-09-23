@@ -1268,12 +1268,43 @@ fn whoami(quiet: bool) -> Result<ExitCode, String> {
     let account = resolved.account;
     println!("{:<12}{}", "account", account.name);
     println!("{:<12}{}", "resolved", resolved.reason.describe());
-    println!("{:<12}{}", "email", account.email);
+
+    // Git's own answer, not the config's. They agree in the ordinary case;
+    // where they do not, what git will actually sign commits with is the only
+    // useful thing to print.
+    match gitwho::git::effective_email(&cwd) {
+        Some(email) => println!("{:<12}{email}", "email"),
+        None => println!("{:<12}{} (from accounts.toml)", "email", account.email),
+    }
+
     match &account.git_credential {
         Some(var) => println!("{:<12}{var}", "credential"),
         // Not a gap: an ssh-only account authenticates with a key and is not
         // made to invent a token (R7).
         None => println!("{:<12}none declared (ssh only)", "credential"),
+    }
+
+    if gitwho::git::identity_pinned(&cwd) {
+        println!(
+            "{:<12}pinned by this repository, which beats every global rule",
+            "identity"
+        );
+    } else {
+        let claimants = gitwho::resolve::claimants(&config, &gitwho::git::remotes(&cwd));
+        if let Some(winner) = claimants.identity_winner {
+            println!();
+            println!("{:<16}AUTHENTICATES AS", "REMOTE");
+            for (remote, claimant) in &claimants.claimed {
+                println!("{remote:<16}{}", claimant.name);
+            }
+            println!();
+            println!(
+                "{} decides the identity: every claiming account's rule applies, and it is\n\
+                 declared last in accounts.toml -- not because it owns origin. Credentials\n\
+                 are unaffected, as the table above shows.",
+                winner.name
+            );
+        }
     }
 
     if !account.env.is_empty() {

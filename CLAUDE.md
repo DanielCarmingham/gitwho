@@ -13,7 +13,7 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
-and MCP wrapping all route real traffic. 242 tests, clippy clean.
+and MCP wrapping all route real traffic. 246 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
 suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
@@ -195,7 +195,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 242 pass, 1 ignored
+cargo test                              # 246 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

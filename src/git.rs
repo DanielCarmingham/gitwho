@@ -122,6 +122,25 @@ pub fn identity_pinned(dir: &Path) -> bool {
         .any(|key| !local_config(dir, &["--get-all", key]).is_empty())
 }
 
+/// The `user.email` git will actually use in the repo containing `dir`.
+///
+/// The *effective* value, not the local one: it is the answer after every
+/// include and `includeIf` has been applied, which is the only version worth
+/// reporting. Inferring it from the resolved account instead is how a report
+/// comes to disagree with what git does.
+pub fn effective_email(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["config", "--get", "user.email"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
 /// `git config --local` inside a repo, as trimmed non-empty lines.
 ///
 /// Separate from [`config_values`] because that one asks about the ambient

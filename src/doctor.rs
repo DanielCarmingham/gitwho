@@ -513,42 +513,22 @@ fn check_repo_identity(config: &Config, git: &GitWiring, findings: &mut Vec<Find
         return;
     }
 
-    // Only remotes an account actually claims apply an identity rule. An
-    // unmatched one -- a third-party clone added as a remote -- competes with
-    // nothing, so it is not part of the conflict.
-    let claimed: Vec<(&str, &str)> = git
-        .remotes
-        .iter()
-        .filter_map(|(remote, url)| {
-            let resolved = crate::resolve::resolve_url(config, url).ok()?;
-            Some((remote.as_str(), resolved.account.name.as_str()))
-        })
-        .collect();
-
-    let mut accounts: Vec<&str> = Vec::new();
-    for (_, account) in &claimed {
-        if !accounts.contains(account) {
-            accounts.push(account);
-        }
-    }
-    if accounts.len() < 2 {
-        return;
-    }
-
-    // Declaration order is include order is precedence order: whichever of
-    // these accounts `accounts.toml` lists last has its rule applied last.
-    let Some(winner) = config
-        .accounts
-        .iter()
-        .rev()
-        .find(|a| accounts.contains(&a.name.as_str()))
-    else {
+    let claimants = crate::resolve::claimants(config, &git.remotes);
+    let Some(winner) = claimants.identity_winner else {
         return;
     };
 
-    let pairs: Vec<String> = claimed
+    let mut accounts: Vec<&str> = Vec::new();
+    for (_, account) in &claimants.claimed {
+        if !accounts.contains(&account.name.as_str()) {
+            accounts.push(&account.name);
+        }
+    }
+
+    let pairs: Vec<String> = claimants
+        .claimed
         .iter()
-        .map(|(remote, account)| format!("{remote} -> {account}"))
+        .map(|(remote, account)| format!("{remote} -> {}", account.name))
         .collect();
 
     findings.push(Finding::new(
