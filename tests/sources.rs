@@ -32,7 +32,7 @@ const ACCOUNTS: &str = r#"
     email = "me@example.net"
     gitCredential = "GITEA_TOKEN"
     match = ["git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://git.example.net"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
 fn ok(stdout: &str) -> Captured {
@@ -91,7 +91,7 @@ fn a_sourced_entry_parses_alongside_the_string_forms() {
         selfhosted
             .env
             .iter()
-            .find(|s| s.name() == "GITEA_HOST")
+            .find(|s| s.name() == "GITEA_INSTANCE_URL")
             .and_then(|s| s.literal()),
         Some("https://git.example.net")
     );

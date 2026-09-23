@@ -125,6 +125,38 @@ what changed.
 piece by hand, the checks that prove it works, and the two test commands that
 produce false passes.
 
+## Starting a new repository
+
+A repository with no remote gives gitwho nothing to match. It resolves by
+`paths` if the directory is under one, and otherwise falls back to the default
+account — which `gh` will use without complaint, so `gh repo create` can
+quietly create the repository under the wrong account. Name the account, and
+add the remote **before the first commit** so the author identity resolves
+from it too:
+
+```sh
+git init acme-widget && cd acme-widget
+gitwho exec --account Work -- \
+    gh repo create example-corp/acme-widget --private --source=. --remote=origin
+gitwho whoami                  # now matched by the remote, not guessed
+git add . && git commit -m 'Initial commit' && git push -u origin main
+```
+
+On Gitea or Forgejo, `tea` creates the repository but adds no remote:
+
+```sh
+gitwho exec --account SelfHosted -- tea repos create --name acme-widget --private
+git remote add origin git@ssh.git.example.net:you/acme-widget.git
+```
+
+`tea` authenticates from `GITEA_TOKEN` **and** `GITEA_INSTANCE_URL`, so the
+account needs both in `env`. It reads no other name for the URL: declare
+`GITEA_HOST` instead and it silently falls back to the login in its own config.
+`doctor` reports an account that declares only one of the two.
+
+Once the remote exists, nothing needs naming again — every later `gh`, `tea`,
+push and commit resolves from it.
+
 ## Commands
 
 ```

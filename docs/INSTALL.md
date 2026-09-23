@@ -459,3 +459,11 @@ is the cost of the store never being in a repo.
   `gh` works and says nothing claimed the remote, while the credential helper
   refuses. That is the designed behaviour, not a misconfiguration — a wrong
   account served quietly is the failure this tool was built to prevent.
+- **A brand-new repository is unmatched until it has a remote**, so
+  `gh repo create` run inside it acts as the default account. Pass
+  `gitwho exec --account <name>`, and add the remote before the first commit.
+  The README's [Starting a new repository](../README.md#starting-a-new-repository)
+  has the `gh` and `tea` versions.
+- **`tea` reads `GITEA_INSTANCE_URL`, not `GITEA_HOST`.** With the wrong name
+  it quietly uses whichever login is stored in its own config instead of the
+  account gitwho resolved.

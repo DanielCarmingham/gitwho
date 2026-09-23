@@ -27,7 +27,7 @@ const ACCOUNTS: &str = r#"
     email = "you@example.net"
     gitCredential = "GITEA_TOKEN"
     match = ["git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://git.example.net/api/v1"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
 fn git(dir: &Path, args: &[&str]) {
@@ -98,7 +98,7 @@ fn names_the_credential_variable_and_where_each_value_lives() {
     // A literal is declared in accounts.toml and needs nothing stored; saying
     // so is the difference between "you have not set this yet" and "you never
     // will".
-    assert!(stdout.contains("GITEA_HOST"), "{stdout}");
+    assert!(stdout.contains("GITEA_INSTANCE_URL"), "{stdout}");
     assert!(stdout.contains("literal"), "{stdout}");
 }
 

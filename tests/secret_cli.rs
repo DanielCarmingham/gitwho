@@ -29,7 +29,7 @@ const ACCOUNTS: &str = r#"
     provider = "gitea"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://ssh.git.example.net/api/v1"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://ssh.git.example.net"]
 "#;
 
 fn setup(dir: &Path) {
@@ -137,8 +137,8 @@ fn secret_list_reports_declared_variables_with_no_stored_value() {
         "an unstored declared variable should be reported as missing; got:\n{stdout}"
     );
     assert!(
-        !stdout.contains("GITEA_HOST"),
-        "GITEA_HOST is a literal, not a secret, and should not be listed as one; got:\n{stdout}"
+        !stdout.contains("GITEA_INSTANCE_URL"),
+        "GITEA_INSTANCE_URL is a literal, not a secret, and should not be listed as one; got:\n{stdout}"
     );
 }
 

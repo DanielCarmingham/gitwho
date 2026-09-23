@@ -23,7 +23,7 @@ const ACCOUNTS: &str = r#"
     provider = "gitea"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_HOST=https://ssh.git.example.net/api/v1"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://ssh.git.example.net"]
 "#;
 
 fn backend() -> EnvBackend {
@@ -88,8 +88,8 @@ fn a_scrubbed_variable_the_account_needs_is_still_set() {
         Some("gitea-token")
     );
     assert_eq!(
-        plan.set.get("GITEA_HOST").map(String::as_str),
-        Some("https://ssh.git.example.net/api/v1"),
+        plan.set.get("GITEA_INSTANCE_URL").map(String::as_str),
+        Some("https://ssh.git.example.net"),
         "a literal VAR=value entry should pass through unchanged"
     );
 }

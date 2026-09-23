@@ -136,7 +136,14 @@ match = [
     "git.example.net/**",
     "ssh.git.example.net/**",
 ]
-# `tea` needs its host as well as its token. The host is not a secret, so it is
-# written literally here rather than stored.
-env = ["GITEA_TOKEN", "GITEA_HOST=https://git.example.net"]
+# `tea` needs the instance's base URL as well as its token, and only under
+# these two names: given both, it builds a login from the environment that
+# overrides any login in its own config. It never reads `GITEA_HOST` -- set
+# that instead and tea silently uses its stored login, not this account.
+# `doctor` reports an account that declares only one of the pair. The URL is
+# not a secret, so it is written literally here rather than stored.
+#
+# gitea-mcp reads different names: `GITEA_HOST` and `GITEA_ACCESS_TOKEN`. An
+# account whose MCP server is wrapped by `gitwho mcp sync` declares those too.
+env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 paths = ["~/src/selfhosted/"]

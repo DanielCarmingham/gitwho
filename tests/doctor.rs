@@ -26,7 +26,7 @@ const ACCOUNTS: &str = r#"
     provider = "gitea"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
 fn stocked_backend() -> EnvBackend {
@@ -796,7 +796,7 @@ const WITH_A_SOURCE: &str = r#"
     provider = "gitea"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN"]
+    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
 fn gh_holding(token: &str) -> MapRunner {
@@ -1057,5 +1057,81 @@ fn an_unclaimed_remote_alongside_a_claimed_one_is_not_an_identity_conflict() {
         identity_finding(&findings).is_none(),
         "an unmatched remote claims no identity: {:?}",
         identity_finding(&findings)
+    );
+}
+
+fn tea_config(env: &str) -> Config {
+    Config::parse(&format!(
+        r#"
+        [defaults]
+        account = "SelfHosted"
+        gitName = "Test Person"
+
+        [[accounts]]
+        name = "SelfHosted"
+        provider = "gitea"
+        email = "you@example.net"
+        match = ["git.example.net/**"]
+        env = {env}
+    "#
+    ))
+    .unwrap()
+}
+
+fn problem_messages(config: &Config) -> Vec<String> {
+    let findings = run_with(
+        config,
+        &stocked_backend(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+    );
+    problems(&findings)
+        .iter()
+        .map(|f| f.message.clone())
+        .collect()
+}
+
+#[test]
+fn a_gitea_token_without_an_instance_url_is_a_problem() {
+    // tea builds a login from the environment only when it has both. With the
+    // token alone it quietly uses whatever login its own config holds, which
+    // may be a different account entirely. Seen for real: a config declaring
+    // GITEA_HOST, a name tea never reads.
+    let config = tea_config(r#"["GITEA_TOKEN", "GITEA_HOST=https://git.example.net"]"#);
+
+    let messages = problem_messages(&config);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_INSTANCE_URL")),
+        "the missing URL should be named; got {messages:?}"
+    );
+}
+
+#[test]
+fn a_gitea_instance_url_without_a_token_is_a_problem() {
+    let config = tea_config(r#"["GITEA_INSTANCE_URL=https://git.example.net"]"#);
+
+    let messages = problem_messages(&config);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
+        "the missing token should be named; got {messages:?}"
+    );
+}
+
+#[test]
+fn gitea_mcp_variables_beside_teas_are_not_a_problem() {
+    // gitea-mcp reads GITEA_HOST and GITEA_ACCESS_TOKEN. Declaring them next to
+    // tea's pair is how one account serves both, not a misspelling.
+    let config = tea_config(
+        r#"["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net", "GITEA_HOST=https://git.example.net"]"#,
+    );
+
+    let messages = problem_messages(&config);
+    assert!(
+        !messages.iter().any(|m| m.contains("GITEA")),
+        "a complete tea pair should raise nothing; got {messages:?}"
     );
 }

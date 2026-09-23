@@ -36,15 +36,15 @@ const ACCOUNTS = [
  * would claim a general scrub the tool does not perform.
  *
  * Both GitHub accounts name GH_TOKEN, which is why three accounts yield three
- * rows rather than six: the set is of names. GITEA_HOST is the gitea account's
- * second declaration — `tea` needs its host as well as its token — and it is
- * cleared on the same rule as the token, being declared rather than being
- * secret.
+ * rows rather than six: the set is of names. GITEA_INSTANCE_URL is the gitea
+ * account's second declaration — `tea` needs its URL as well as its token —
+ * and it is cleared on the same rule as the token, being declared rather than
+ * being secret.
  */
 const ENV = [
   { name: 'GH_TOKEN', state: 'set', kept: true },
   { name: 'GITEA_TOKEN', state: 'cleared', kept: false },
-  { name: 'GITEA_HOST', state: 'cleared', kept: false },
+  { name: 'GITEA_INSTANCE_URL', state: 'cleared', kept: false },
 ];
 
 const ROWS3 = [48, 70, 92];
@@ -169,7 +169,7 @@ const ROWS3 = [48, 70, 92];
       <title id="flow-process-title">One process, one token</title>
       <desc id="flow-process-desc">
         gitwho runs the command with exactly one account's credentials. GH_TOKEN is set for this one
-        process, from the account that matched. GITEA_TOKEN and GITEA_HOST — the variables the gitea
+        process, from the account that matched. GITEA_TOKEN and GITEA_INSTANCE_URL — the variables the gitea
         account declares — are cleared before the process starts, shown struck through. What gets
         cleared is every variable named by any account in this config, so adding an account protects
         every other account from it. The token is present in one process for one invocation instead
@@ -198,7 +198,7 @@ const ROWS3 = [48, 70, 92];
                 y2={ROWS3[i] - 3.6}
               />
             )}
-            <text class={variable.kept ? 'mono hit' : 'mono dim'} x="112" y={ROWS3[i]}>
+            <text class={variable.kept ? 'mono hit' : 'mono dim'} x="146" y={ROWS3[i]}>
               {variable.state}
             </text>
           </>

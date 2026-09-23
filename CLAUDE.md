@@ -126,7 +126,7 @@ Providers differ in **mechanism**, not just variable name:
   a property of a *remote*, not of an account, and why there is no `gitAuth`
   field.
 - Each CLI reads its own variables: `gh`→`GH_TOKEN`, `tea`→`GITEA_TOKEN` +
-  `GITEA_HOST`, `glab`→`GITLAB_TOKEN`, `az devops`→its own.
+  `GITEA_INSTANCE_URL`, `glab`→`GITLAB_TOKEN`, `az devops`→its own.
 
 The declaration schema is in
 [docs/accounts.toml.example](docs/accounts.toml.example). `env` and
@@ -200,7 +200,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 246 pass, 1 ignored
+cargo test                              # 256 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

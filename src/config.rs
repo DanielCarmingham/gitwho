@@ -152,7 +152,7 @@ impl<'de> Deserialize<'de> for EnvSpec {
 
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 f.write_str(
-                    r#"a variable name like "GH_TOKEN", a literal like "GITEA_HOST=https://...", or a table like { var = "GH_TOKEN", from = "gh", user = "octocat" }"#,
+                    r#"a variable name like "GH_TOKEN", a literal like "GITEA_INSTANCE_URL=https://...", or a table like { var = "GH_TOKEN", from = "gh", user = "octocat" }"#,
                 )
             }
 

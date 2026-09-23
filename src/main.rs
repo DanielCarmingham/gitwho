@@ -17,6 +17,29 @@ use gitwho::secrets::{
 };
 use gitwho::sources::ProcessRunner;
 
+const EXEC_EXAMPLES: &str = "\
+Examples:
+  Run a command as whichever account this repository resolves to:
+    gitwho exec -- gh pr list
+
+  Create a new repository with credentials you already have. A repository
+  with no remote has nothing to match, so it resolves by `paths` or falls
+  back to the default account -- which `gh` will use without complaint.
+  Name the account instead, and add the remote before the first commit so
+  the author identity resolves from it too:
+    git init acme-widget && cd acme-widget
+    gitwho exec --account Work -- \\
+        gh repo create example-corp/acme-widget --private --source=. --remote=origin
+    gitwho whoami                  # now matched by the remote
+    git add . && git commit -m 'Initial commit' && git push -u origin main
+
+  The same on Gitea or Forgejo. `tea` creates the repository but adds no
+  remote, so add it yourself. It authenticates from the account's
+  GITEA_TOKEN and GITEA_INSTANCE_URL, and silently ignores GITEA_HOST.
+    gitwho exec --account SelfHosted -- \\
+        tea repos create --name acme-widget --private
+    git remote add origin git@ssh.git.example.net:you/acme-widget.git";
+
 #[derive(Parser)]
 #[command(
     name = "gitwho",
@@ -43,8 +66,8 @@ enum Command {
     /// Run a command with exactly one account's credentials.
     ///
     /// Variables managed by any account are cleared first, then the resolved
-    /// account's are set, so nothing inherited from the shell survives:
-    ///     gitwho exec -- gh pr list
+    /// account's are set, so nothing inherited from the shell survives.
+    #[command(after_long_help = EXEC_EXAMPLES)]
     Exec {
         /// Use this account instead of resolving one from the current repo.
         #[arg(long)]

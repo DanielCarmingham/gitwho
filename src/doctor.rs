@@ -341,6 +341,27 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
         }
     }
 
+    // tea builds a login from the environment only when both are set. With one
+    // it falls back to the login in its own config -- a working tea, quite
+    // possibly as another account, which is R8's failure exactly.
+    for account in &config.accounts {
+        let declares = |var: &str| account.env.iter().any(|spec| spec.name() == var);
+        let missing = match (declares("GITEA_TOKEN"), declares("GITEA_INSTANCE_URL")) {
+            (true, false) => "GITEA_INSTANCE_URL",
+            (false, true) => "GITEA_TOKEN",
+            _ => continue,
+        };
+        findings.push(Finding::new(
+            Level::Problem,
+            "config",
+            format!(
+                "account {} declares one of tea's GITEA_TOKEN and GITEA_INSTANCE_URL but not {missing}; \
+                 tea needs both, and otherwise silently uses the login in its own config",
+                account.name
+            ),
+        ));
+    }
+
     for account in &config.accounts {
         for pattern in &account.match_patterns {
             if let Err(e) = globset::Glob::new(pattern) {

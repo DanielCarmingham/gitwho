@@ -152,7 +152,15 @@ silent failure.
   git authenticates with a key via `core.sshcommand`, and no token is involved
   in the transport path — *and* over https for its API, which does need one.
 - Each CLI reads its own variables: `gh` → `GH_TOKEN`; `tea` → `GITEA_TOKEN`
-  and `GITEA_HOST`; `glab` → `GITLAB_TOKEN`; `az devops` its own.
+  and `GITEA_INSTANCE_URL`; `glab` → `GITLAB_TOKEN`; `az devops` its own.
+  `tea` needs *both* before it builds a login from the environment, and that
+  login then overrides any login stored in its own config. Anything else,
+  `GITEA_HOST` included, is ignored without a word, and tea falls back to its
+  stored login. Measured with tea 0.15.1 against unresolvable `.invalid`
+  hosts, reading the host each run dialed. `gitea-mcp` is a separate
+  consumer with its own names, `GITEA_HOST` and `GITEA_ACCESS_TOKEN` (per its
+  README), which is why `doctor` checks tea's pair without calling
+  `GITEA_HOST` a mistake.
 
 Transport is a property of a **remote**, not of an account: git picks it per
 remote, and a credential helper is only ever consulted for https. An account
