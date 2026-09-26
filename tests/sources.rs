@@ -93,3 +93,24 @@ fn a_cleared_variable_never_reaches_the_child_process() {
 
     assert_eq!(captured.stdout.trim(), "unset");
 }
+
+/// Windows resolves a bare `gh` as `gh.exe` (or `.com`/`.bat`/`.cmd`) and never
+/// as an extensionless file, so without this every token fetch there reported
+/// gh as not installed. Reached from any host by naming the target.
+#[cfg(unix)]
+#[test]
+fn a_windows_target_finds_a_bare_name_by_its_executable_extension() {
+    use gitwho::shim::ShimTarget;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("gh.exe");
+    std::fs::write(&exe, "").unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let windows = ProcessRunner::unshimmed().for_target(ShimTarget::Windows);
+    assert_eq!(windows.resolve_in("gh", dir.path()), Some(exe));
+
+    let posix = ProcessRunner::unshimmed().for_target(ShimTarget::Posix);
+    assert_eq!(posix.resolve_in("gh", dir.path()), None);
+}

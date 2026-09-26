@@ -13,7 +13,7 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, CLI-sourced tokens, `exec` + shims, `doctor`,
-`sync` and MCP wrapping all route real traffic. 215 tests, clippy clean.
+`sync` and MCP wrapping all route real traffic. 222 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
 suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
@@ -25,19 +25,18 @@ rust:1.88-bookworm`, copying the tree in rather than building in the mount.
 x86-64 Linux is still only covered by CI.
 
 **Windows is unverified in the strong sense.** `%APPDATA%\gitwho` in
-`src/paths.rs` and the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs` are
-unit-tested as pure functions from macOS; none has ever run on Windows. gitwho
+`src/paths.rs`, the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs`, and the
+same lookup when `sources::ProcessRunner` finds `gh.exe`/`tea.exe` for a token
+are unit-tested as pure functions from macOS; none has ever run on Windows. gitwho
 neither applies nor checks ACLs there: `doctor`'s permission check is
 unix-only and does nothing on Windows. **Do not describe any of it as working.**
 
-Known gap, not implemented: `sources::ProcessRunner::resolve_in` looks for the
-bare name with no `PATHEXT`/`.exe` lookup, so on Windows a token fetch would
-find no `gh.exe` or `tea.exe` and report the CLI as not installed.
-
 The mechanism that makes that testable is a **parameter, never a `cfg!`**:
-`paths::Layout` and `shim::ShimTarget` are arguments, with `HOST` used only by
-`main`. A `cfg!(windows)` branch is unreachable from a test run here, so it can
-be documented as covered while nothing can reach it — which is exactly what
+`paths::Layout` and `shim::ShimTarget` are arguments, with `HOST` used only as
+the default at the entry points (`main`, and `ProcessRunner`'s constructors,
+which tests override with `for_target`). A `cfg!(windows)` branch is
+unreachable from a test run here, so it can be documented as covered while
+nothing can reach it — which is exactly what
 happened to an earlier `APPDATA` branch. The test binaries are
 `#[cfg(unix)]`-gated around anything touching `std::os::unix`, so `cargo test`
 still *builds* elsewhere.
@@ -208,7 +207,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 215 pass, 0 ignored
+cargo test                              # 222 pass, 0 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

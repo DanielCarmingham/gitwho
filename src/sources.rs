@@ -68,6 +68,9 @@ pub struct ProcessRunner {
     /// an ambient credential can never stand in for the login gitwho asked
     /// for (R8).
     clearing: Vec<String>,
+    /// Whose conventions a bare program name is resolved by. A parameter, not
+    /// a `cfg!`, so the Windows lookup is reachable from a test on any host.
+    target: crate::shim::ShimTarget,
 }
 
 impl ProcessRunner {
@@ -79,6 +82,7 @@ impl ProcessRunner {
         Self {
             shim_dirs: Vec::new(),
             clearing: always_cleared_owned(),
+            target: crate::shim::ShimTarget::HOST,
         }
     }
 
@@ -88,12 +92,20 @@ impl ProcessRunner {
         Self {
             shim_dirs,
             clearing: always_cleared_owned(),
+            target: crate::shim::ShimTarget::HOST,
         }
     }
 
     /// Replace the set of variables cleared from the child's environment.
     pub fn clearing(mut self, names: &[&str]) -> Self {
         self.clearing = names.iter().map(|name| name.to_string()).collect();
+        self
+    }
+
+    /// Resolve bare program names by `target`'s conventions instead of this
+    /// host's.
+    pub fn for_target(mut self, target: crate::shim::ShimTarget) -> Self {
+        self.target = target;
         self
     }
 
@@ -119,13 +131,16 @@ impl ProcessRunner {
             return Some(std::path::PathBuf::from(program));
         }
 
+        let names = crate::shim::candidate_names(program, self.target);
         for dir in std::env::split_paths(path_var.as_ref()) {
             if self.shim_dirs.iter().any(|shim| shim == &dir) {
                 continue;
             }
-            let candidate = dir.join(program);
-            if is_executable(&candidate) {
-                return Some(candidate);
+            for name in &names {
+                let candidate = dir.join(name);
+                if is_executable(&candidate) {
+                    return Some(candidate);
+                }
             }
         }
         None

@@ -190,7 +190,7 @@ pub fn find_real_binary(
 
 /// The file names a bare command could be on this target, in the order the
 /// platform itself would try them.
-fn candidate_names(name: &str, target: ShimTarget) -> Vec<String> {
+pub(crate) fn candidate_names(name: &str, target: ShimTarget) -> Vec<String> {
     match target {
         ShimTarget::Posix => vec![name.to_string()],
         // A name that already carries an extension is used as written -- `gh.exe`
