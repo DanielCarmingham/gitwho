@@ -8,7 +8,7 @@ use std::process::Command;
 use common::FakeTools;
 use gitwho::config::Config;
 use gitwho::publish::{
-    choose_account, create_args, foreign_authors, parse_created, transport, Transport,
+    author_fix, choose_account, create_args, foreign_authors, parse_created, transport, Transport,
 };
 
 const ACCOUNTS: &str = r#"
@@ -95,6 +95,49 @@ fn authors_other_than_the_account_are_reported_once_each() {
         foreign_authors("you@example.net", &authors),
         ["me@example.com"]
     );
+}
+
+/// git-filter-repo rewrites author and committer from a mailmap; `--force`
+/// because a local repository is not a fresh clone (verified with
+/// git-filter-repo a40bce548d2c).
+#[test]
+fn the_fix_maps_every_wrong_author_to_the_account_with_git_filter_repo() {
+    let fix = author_fix(
+        Some("Test Person"),
+        "you@example.net",
+        &["a@example.org".to_string(), "b@example.org".to_string()],
+    );
+    assert!(
+        fix.contains("'Test Person <you@example.net> <a@example.org>'"),
+        "{fix}"
+    );
+    assert!(
+        fix.contains("'Test Person <you@example.net> <b@example.org>'"),
+        "{fix}"
+    );
+    assert!(
+        fix.contains("git filter-repo --force --mailmap .git/gitwho.mailmap"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn a_quote_in_the_name_cannot_break_the_command() {
+    let fix = author_fix(
+        Some("Pat O'Brien"),
+        "pat@example.net",
+        &["x@example.org".to_string()],
+    );
+    assert!(
+        fix.contains("'Pat O'\\''Brien <pat@example.net> <x@example.org>'"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn without_a_name_only_the_email_is_mapped() {
+    let fix = author_fix(None, "you@example.net", &["a@example.org".to_string()]);
+    assert!(fix.contains("'<you@example.net> <a@example.org>'"), "{fix}");
 }
 
 // --- the create call --------------------------------------------------------
@@ -330,7 +373,8 @@ fn a_commit_by_another_author_stops_it_before_anything_is_created() {
 
     assert!(!output.status.success(), "{combined}");
     assert!(combined.contains("someone-else@example.org"), "{combined}");
-    assert!(combined.contains("--reset-author"), "{combined}");
+    assert!(combined.contains("git filter-repo"), "{combined}");
+    assert!(combined.contains("--keep-authors"), "{combined}");
     assert_eq!(
         fixture.fakes.api_args("gh"),
         None,
@@ -588,4 +632,31 @@ fn a_first_remote_can_be_given_another_name() {
         git_config(fixture.repo.path(), "branch.main.remote").as_deref(),
         Some("github")
     );
+}
+
+/// The author check is a guard, not a gate: the person who knows the history
+/// is right can publish it as it is.
+#[test]
+fn keep_authors_publishes_the_history_as_it_is() {
+    let fixture = Fixture::new("someone-else@example.org");
+    fixture.server_answers();
+
+    let output = fixture.publish(&[
+        "--account",
+        "Personal",
+        "--name",
+        "widget",
+        "--keep-authors",
+    ]);
+    let combined = out(&output);
+
+    assert!(output.status.success(), "{combined}");
+    assert!(combined.contains("someone-else@example.org"), "{combined}");
+    assert!(fixture.fakes.api_args("gh").is_some());
+    let pushed = Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .current_dir(fixture.server.path())
+        .output()
+        .unwrap();
+    assert!(pushed.status.success(), "main did not reach the server");
 }

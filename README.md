@@ -139,7 +139,9 @@ gitwho publish --account SelfHosted              # Gitea/Forgejo, via tea
 - **Authorship is checked first.** If any commit was authored by someone other
   than the account's `email` — typically your default identity, because the
   commit came before the remote did — it stops before creating anything and
-  prints the command that fixes the authors.
+  prints the [git-filter-repo](https://github.com/newren/git-filter-repo)
+  command that rewrites them to the account. `--keep-authors` publishes them
+  as they are instead.
 - **`origin` comes from the server's answer**: the ssh URL for an account with
   an `sshKey`, the https URL otherwise (`--ssh` / `--https` to choose). A
   server's ssh host often differs from its web host, so it is never guessed.
@@ -199,7 +201,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 243 tests, clippy clean.
+no longer exports a token per directory. 247 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

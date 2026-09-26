@@ -37,8 +37,10 @@ Examples:
   Inside a directory an account claims with `paths`, no flag is needed:
     cd ~/src/selfhosted/widget && gitwho publish
 
-  If it stops because a commit has the wrong author, it prints the command
-  that fixes it; nothing has been created at that point.
+  If it stops because a commit has the wrong author, it prints the
+  git-filter-repo command that fixes it; nothing has been created at that
+  point. To publish those commits as they are instead:
+    gitwho publish --account Work --keep-authors
 
   Publish a copy of a repository that already has origin to another account,
   as a second remote (the branch keeps tracking origin):
@@ -86,7 +88,7 @@ enum Command {
     /// For a repository with commits and no remote yet. The account is the one
     /// named with --account, or the one whose `paths` claims this directory;
     /// never the default. Refuses before creating anything if a commit was
-    /// authored by anyone but that account.
+    /// authored by anyone but that account, unless --keep-authors is given.
     #[command(after_long_help = PUBLISH_EXAMPLES)]
     Publish {
         /// The account to publish as.
@@ -113,6 +115,10 @@ enum Command {
         /// keeps its upstream, and https is the default.
         #[arg(long, value_name = "NAME")]
         remote: Option<String>,
+        /// Publish even if commits were authored by someone other than the
+        /// account, leaving their authorship as it is.
+        #[arg(long)]
+        keep_authors: bool,
     },
 
     /// Set up everything on a machine that has never run gitwho.
@@ -284,6 +290,7 @@ fn main() -> ExitCode {
             ssh,
             https,
             remote,
+            keep_authors,
         } => {
             let requested = match (ssh, https) {
                 (true, _) => Some(Transport::Ssh),
@@ -297,6 +304,7 @@ fn main() -> ExitCode {
                 public,
                 requested,
                 remote.as_deref(),
+                keep_authors,
             ) {
                 Ok(code) => code,
                 Err(message) => {
@@ -856,8 +864,11 @@ fn publish(
     public: bool,
     requested: Option<Transport>,
     remote: Option<&str>,
+    keep_authors: bool,
 ) -> Result<ExitCode, String> {
-    use gitwho::publish::{choose_account, create_args, foreign_authors, parse_created, transport};
+    use gitwho::publish::{
+        author_fix, choose_account, create_args, foreign_authors, parse_created, transport,
+    };
 
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let top = git_output(&cwd, &["rev-parse", "--show-toplevel"])
@@ -906,23 +917,27 @@ fn publish(
         .collect();
     let foreign = foreign_authors(&account.email, &authors);
     if !copy && !foreign.is_empty() {
-        let author = match account
-            .git_name
-            .as_deref()
-            .or(config.defaults.git_name.as_deref())
-        {
-            Some(git_name) => format!("-c user.name='{git_name}' -c user.email={}", account.email),
-            None => format!("-c user.email={}", account.email),
-        };
-        return Err(format!(
-            "commits here are authored by {} rather than {} ({}); nothing was created.\n\
-             Fix the authors first, then publish again:\n  \
-             last commit only:  git {author} commit --amend --no-edit --reset-author\n  \
-             every commit:      git rebase -r --root --exec \"git {author} commit --amend --no-edit --reset-author\"",
-            foreign.join(", "),
-            account.name,
-            account.email
-        ));
+        if keep_authors {
+            println!(
+                "author check skipped (--keep-authors): commits by {} are published as they are",
+                foreign.join(", ")
+            );
+        } else {
+            let git_name = account
+                .git_name
+                .as_deref()
+                .or(config.defaults.git_name.as_deref());
+            return Err(format!(
+                "commits here are authored by {} rather than {} ({}); nothing was created.\n\
+                 To make them the account's, rewrite them with git-filter-repo \
+                 (`brew install git-filter-repo`), then publish again:\n\n{}\n\n\
+                 To publish them as they are, add --keep-authors.",
+                foreign.join(", "),
+                account.name,
+                account.email,
+                author_fix(git_name, &account.email, &foreign)
+            ));
+        }
     }
 
     let repo_name = match name {

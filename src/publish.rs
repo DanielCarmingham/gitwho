@@ -88,6 +88,25 @@ pub fn foreign_authors(email: &str, authors: &[String]) -> Vec<String> {
     foreign
 }
 
+/// Shell commands that rewrite every commit by a `foreign` author to the
+/// account's identity. git-filter-repo maps author and committer alike, and
+/// needs `--force` because a local repository is not a fresh clone.
+pub fn author_fix(git_name: Option<&str>, email: &str, foreign: &[String]) -> String {
+    let proper = match git_name {
+        Some(name) => format!("{name} <{email}>"),
+        None => format!("<{email}>"),
+    };
+    let lines: Vec<String> = foreign
+        .iter()
+        .map(|old| crate::shim::shell_quote(&format!("{proper} <{old}>")))
+        .collect();
+    format!(
+        "printf '%s\\n' {} > .git/gitwho.mailmap\n\
+         git filter-repo --force --mailmap .git/gitwho.mailmap",
+        lines.join(" ")
+    )
+}
+
 /// Arguments to `gh`/`tea` that create the repository. Both CLIs' `api`
 /// commands take the same flags, and both servers the same endpoint.
 pub fn create_args(name: &str, owner: Option<&str>, public: bool) -> Vec<String> {
