@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::config::Config;
-use crate::secrets::{fingerprint, Backend, BackendKind, Choice};
+use crate::provider::always_cleared;
+use crate::secrets::{fingerprint, BackendKind, Choice};
 use crate::sources::{self, Runner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +118,6 @@ pub fn current_uid() -> u32 {
 /// Inspect everything and return what was found. Never writes.
 pub fn run(
     config: &Config,
-    backend: &dyn Backend,
     runner: &dyn Runner,
     ambient_env: &BTreeMap<String, String>,
     git: &GitWiring,
@@ -130,8 +130,8 @@ pub fn run(
     check_permissions(store, &mut findings);
     check_storage(store, &mut findings);
     check_config(config, &mut findings);
-    check_secrets(config, backend, runner, &mut findings);
-    check_ambient(config, ambient_env, &mut findings);
+    check_tokens(config, runner, &mut findings);
+    check_ambient(ambient_env, &mut findings);
     check_git_wiring(git, &mut findings);
     check_repo_identity(config, git, &mut findings);
 
@@ -341,27 +341,6 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
         }
     }
 
-    // tea builds a login from the environment only when both are set. With one
-    // it falls back to the login in its own config -- a working tea, quite
-    // possibly as another account, which is R8's failure exactly.
-    for account in &config.accounts {
-        let declares = |var: &str| account.env.iter().any(|spec| spec.name() == var);
-        let missing = match (declares("GITEA_TOKEN"), declares("GITEA_INSTANCE_URL")) {
-            (true, false) => "GITEA_INSTANCE_URL",
-            (false, true) => "GITEA_TOKEN",
-            _ => continue,
-        };
-        findings.push(Finding::new(
-            Level::Problem,
-            "config",
-            format!(
-                "account {} declares one of tea's GITEA_TOKEN and GITEA_INSTANCE_URL but not {missing}; \
-                 tea needs both, and otherwise silently uses the login in its own config",
-                account.name
-            ),
-        ));
-    }
-
     for account in &config.accounts {
         for pattern in &account.match_patterns {
             if let Err(e) = globset::Glob::new(pattern) {
@@ -378,92 +357,41 @@ fn check_config(config: &Config, findings: &mut Vec<Finding>) {
     }
 }
 
-fn check_secrets(
-    config: &Config,
-    backend: &dyn Backend,
-    runner: &dyn Runner,
-    findings: &mut Vec<Finding>,
-) {
+/// The one check that runs other programs: a perfect config is no use if the
+/// CLI it points at has lost the login. A token the server has revoked still
+/// looks healthy here -- telling those apart needs the network.
+fn check_tokens(config: &Config, runner: &dyn Runner, findings: &mut Vec<Finding>) {
     for account in &config.accounts {
-        for var in account.secret_vars() {
-            match backend.get(&account.name, var) {
-                Ok(Some(value)) => findings.push(Finding::new(
-                    Level::Ok,
-                    "secrets",
-                    format!("{}/{var} {}", account.name, fingerprint(&value)),
-                )),
-                Ok(None) => findings.push(Finding::new(
-                    Level::Problem,
-                    "secrets",
-                    format!("{}/{var} has no stored value", account.name),
-                )),
-                Err(e) => findings.push(Finding::new(
-                    Level::Problem,
-                    "secrets",
-                    format!("{}/{var} could not be read: {e}", account.name),
-                )),
-            }
-        }
-
-        // Referenced variables are not in `secret_vars` -- nothing is owed to
-        // the store for them -- so without this they would vanish from the
-        // report entirely, and a credential silently missing from `doctor` is
-        // the opposite of what `doctor` is for.
-        //
-        // This is the one check that runs another program. It is why `doctor`
-        // is worth running after `gh auth logout` and not only after editing
-        // `accounts.toml`: the declaration can be perfect while the tool it
-        // points at has nothing.
-        for sourced in account.sourced_vars() {
-            let var = &sourced.var;
-            match sources::fetch(runner, &account.name, sourced) {
-                Ok(value) => findings.push(Finding::new(
-                    Level::Ok,
-                    "secrets",
-                    format!(
-                        "{}/{var} {} (from {})",
-                        account.name,
-                        fingerprint(&value),
-                        sourced.from
-                    ),
-                )),
-                // The source's own message, which already names the account and
-                // the variable and says what the tool said.
-                Err(e) => findings.push(Finding::new(Level::Problem, "secrets", e.to_string())),
-            }
+        match sources::token(runner, &account.token_owner()) {
+            Ok(token) => findings.push(Finding::new(
+                Level::Ok,
+                "tokens",
+                format!(
+                    "{}: {} login {} {}",
+                    account.name,
+                    account.provider.cli(),
+                    account.login,
+                    fingerprint(&token)
+                ),
+            )),
+            Err(e) => findings.push(Finding::new(Level::Problem, "tokens", e.to_string())),
         }
     }
 }
 
-/// A managed variable sitting in the environment is the condition this project
-/// exists to remove: every process launched from that shell inherits it,
-/// including ones belonging to a different account.
-fn check_ambient(config: &Config, env: &BTreeMap<String, String>, findings: &mut Vec<Finding>) {
-    // By variable, not by account. Every GitHub account declares GH_TOKEN, but
-    // there is only one of it in the environment -- reporting per account
-    // turns one fact into a wall of identical lines.
-    let mut seen = std::collections::BTreeSet::new();
-
-    for account in &config.accounts {
-        // Referenced variables included: where the value comes from changes
-        // nothing about the hazard, which is that this shell already exports
-        // one and every process launched from it inherits that one.
-        let sourced = account.sourced_vars();
-        let watched = account
-            .secret_vars()
-            .into_iter()
-            .chain(sourced.iter().map(|s| s.var.as_str()));
-
-        for var in watched {
-            if env.contains_key(var) && seen.insert(var.to_string()) {
-                findings.push(Finding::new(
-                    Level::Warn,
-                    "ambient",
-                    // The name only. Printing the value would leak the very
-                    // thing being complained about.
-                    format!("{var} is set in the environment; every process launched from this shell inherits it"),
-                ));
-            }
+/// A cleared variable sitting in the environment is the condition this
+/// project exists to remove: every process launched from that shell inherits
+/// it, including ones belonging to a different account.
+fn check_ambient(env: &BTreeMap<String, String>, findings: &mut Vec<Finding>) {
+    for var in always_cleared() {
+        if env.contains_key(var) {
+            findings.push(Finding::new(
+                Level::Warn,
+                "ambient",
+                // The name only; printing the value would leak the very thing
+                // being complained about.
+                format!("{var} is set in the environment; every process launched from this shell inherits it"),
+            ));
         }
     }
 }

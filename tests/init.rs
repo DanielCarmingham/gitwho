@@ -2,6 +2,9 @@ use std::path::Path;
 
 use gitwho::init::{self, Applied, Snippet};
 
+mod common;
+use common::FakeTools;
+
 fn includes() -> &'static Path {
     Path::new("/home/someone/.config/gitwho/git/includes.gitconfig")
 }
@@ -167,11 +170,12 @@ fn fresh_home() -> tempfile::TempDir {
     home
 }
 
-fn gitwho(home: &Path, args: &[&str]) -> std::process::Output {
+fn gitwho(home: &Path, args: &[&str], path: &str) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_gitwho"))
         .args(args)
         .env("HOME", home)
         .env("SHELL", "/bin/zsh")
+        .env("PATH", path)
         // Not inherited: a developer machine has these set, and a test that
         // silently used the real store would be both wrong and dangerous.
         .env_remove("GITWHO_CONFIG")
@@ -186,31 +190,15 @@ fn stdout(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// `secret set` takes the value on stdin, never in argv -- anything in argv is
-/// readable by every process on the machine through `ps`.
-fn store_secret(home: &Path, account: &str, var: &str, value: &str) {
-    use std::io::Write;
-
-    let mut child = Command::new(env!("CARGO_BIN_EXE_gitwho"))
-        .args(["secret", "set", account, var])
-        .env("HOME", home)
-        .env_remove("GITWHO_CONFIG")
-        .env_remove("GITWHO_SECRETS")
-        .env_remove("GITWHO_IDENTITY")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-
-    writeln!(child.stdin.as_mut().unwrap(), "{value}").unwrap();
-    assert!(child.wait().unwrap().success(), "storing the secret failed");
-}
-
 #[test]
 fn a_dry_run_on_a_virgin_machine_writes_nothing() {
     let home = fresh_home();
 
-    let out = gitwho(home.path(), &["init"]);
+    let out = gitwho(
+        home.path(),
+        &["init"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
     let text = stdout(&out);
 
     assert!(out.status.success(), "a dry run is not a failure: {text}");
@@ -233,7 +221,11 @@ fn a_dry_run_on_a_virgin_machine_writes_nothing() {
 fn the_first_write_scaffolds_the_config_and_stops() {
     let home = fresh_home();
 
-    let out = gitwho(home.path(), &["init", "--write"]);
+    let out = gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
     let text = stdout(&out);
 
     assert!(
@@ -265,7 +257,11 @@ fn the_scaffolded_store_and_config_are_owner_only() {
     use std::os::unix::fs::PermissionsExt;
 
     let home = fresh_home();
-    gitwho(home.path(), &["init", "--write"]);
+    gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
 
     let mode = |p: std::path::PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
 
@@ -282,7 +278,11 @@ fn the_scaffolded_store_and_config_are_owner_only() {
 #[test]
 fn the_scaffolded_config_is_one_gitwho_can_read_back() {
     let home = fresh_home();
-    gitwho(home.path(), &["init", "--write"]);
+    gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
 
     let text = std::fs::read_to_string(home.path().join(".config/gitwho/accounts.toml")).unwrap();
     gitwho::config::Config::parse(&text).expect("the scaffolded config must parse");
@@ -294,7 +294,8 @@ fn the_scaffolded_config_is_one_gitwho_can_read_back() {
 #[test]
 fn a_completed_setup_re_runs_without_duplicating_anything() {
     let home = fresh_home();
-    gitwho(home.path(), &["init", "--write"]);
+    let path = std::env::var("PATH").unwrap_or_default();
+    gitwho(home.path(), &["init", "--write"], &path);
 
     // Replace the template with a real config, as the printed instructions say.
     std::fs::write(
@@ -307,19 +308,19 @@ gitName = "Test Person"
 [[accounts]]
 name = "Personal"
 provider = "github"
+login = "someone"
 email = "you@example.com"
-gitCredential = "GH_TOKEN"
 match = ["github.com/someone/**"]
-env = ["GH_TOKEN"]
 "#,
     )
     .unwrap();
 
-    // ...and store the token it declares, which is step 2 of the instructions
-    // `init` prints. Without it `doctor` fails, correctly.
-    store_secret(home.path(), "Personal", "GH_TOKEN", "fake-token");
+    // gh needs to hold the login the config declares, which is step 2 of the
+    // instructions `init` prints. Without it `doctor` fails, correctly.
+    let fakes = FakeTools::new();
+    fakes.gh_login("someone", "fake-token");
 
-    let first = gitwho(home.path(), &["init", "--write"]);
+    let first = gitwho(home.path(), &["init", "--write"], &fakes.path());
     assert!(
         first.status.success(),
         "a completed setup should pass doctor; got:\n{}",
@@ -335,7 +336,7 @@ env = ["GH_TOKEN"]
     );
     assert!(zshrc.contains("# existing content"));
 
-    let second = gitwho(home.path(), &["init", "--write"]);
+    let second = gitwho(home.path(), &["init", "--write"], &fakes.path());
     let text = stdout(&second);
 
     assert!(
@@ -373,7 +374,11 @@ fn init_tightens_a_store_directory_someone_else_created() {
     std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(store.join("gitwho-receipt.json"), "{}").unwrap();
 
-    let out = gitwho(home.path(), &["init", "--write"]);
+    let out = gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
     let text = stdout(&out);
 
     let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
@@ -404,7 +409,11 @@ fn a_dry_run_does_not_tighten_anything() {
     std::fs::create_dir_all(&store).unwrap();
     std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let out = gitwho(home.path(), &["init"]);
+    let out = gitwho(
+        home.path(),
+        &["init"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
 
     assert_eq!(
         std::fs::metadata(&store).unwrap().permissions().mode() & 0o777,

@@ -8,26 +8,24 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
-    env = ["GH_TOKEN"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work"
     email = "me@work.example"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/WorkOrg/**"]
-    env = [{ var = "GH_TOKEN", from = "gh", user = "work-login" }]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "selfhosted"
+    url = "https://git.example.net"
     email = "you@example.net"
-    gitCredential = "GITEA_TOKEN"
     match = ["git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
 fn git(dir: &Path, args: &[&str]) {
@@ -84,7 +82,7 @@ fn reports_the_account_and_how_it_was_arrived_at() {
 }
 
 #[test]
-fn names_the_credential_variable_and_where_each_value_lives() {
+fn names_every_variable_exec_sets_and_where_each_value_comes_from() {
     let config = tempfile::tempdir().unwrap();
     setup(config.path());
     let repo = tempfile::tempdir().unwrap();
@@ -93,17 +91,26 @@ fn names_the_credential_variable_and_where_each_value_lives() {
     let out = whoami(config.path(), repo.path(), &[]);
     let stdout = String::from_utf8(out.stdout).unwrap();
 
-    assert!(stdout.contains("GITEA_TOKEN"), "{stdout}");
-    assert!(stdout.contains("stored"), "{stdout}");
-    // A literal is declared in accounts.toml and needs nothing stored; saying
-    // so is the difference between "you have not set this yet" and "you never
-    // will".
-    assert!(stdout.contains("GITEA_INSTANCE_URL"), "{stdout}");
-    assert!(stdout.contains("literal"), "{stdout}");
+    for name in [
+        "GITEA_TOKEN",
+        "GITEA_INSTANCE_URL",
+        "GITEA_ACCESS_TOKEN",
+        "GITEA_HOST",
+    ] {
+        assert!(stdout.contains(name), "{name} missing:\n{stdout}");
+    }
+    assert!(stdout.contains("tea login selfhosted"), "{stdout}");
+    assert!(stdout.contains("https://git.example.net"), "{stdout}");
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.starts_with("provider") && line.contains("gitea")),
+        "{stdout}"
+    );
 }
 
 #[test]
-fn says_when_a_value_is_read_from_another_tool_rather_than_stored() {
+fn says_which_gh_login_supplies_a_github_token() {
     let config = tempfile::tempdir().unwrap();
     setup(config.path());
     let repo = tempfile::tempdir().unwrap();
@@ -112,8 +119,7 @@ fn says_when_a_value_is_read_from_another_tool_rather_than_stored() {
     let out = whoami(config.path(), repo.path(), &[]);
     let stdout = String::from_utf8(out.stdout).unwrap();
 
-    assert!(stdout.contains("gh"), "{stdout}");
-    assert!(stdout.contains("work-login"), "{stdout}");
+    assert!(stdout.contains("gh login work"), "{stdout}");
 }
 
 #[test]

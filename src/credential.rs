@@ -10,25 +10,18 @@ use std::path::Path;
 
 use crate::config::{Account, Config};
 use crate::resolve;
-use crate::secrets::Backend;
-use crate::sources::{self, Runner};
+use crate::sources::{self, Runner, TokenError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
     #[error("cannot tell which account owns this request: {0}")]
     Unresolved(#[from] resolve::ResolveError),
-    #[error("account {account} declares no gitCredential variable")]
-    NoCredentialVariable { account: String },
     #[error(
         "nothing identified an account for this request; it would only fall back to {account}"
     )]
     LowConfidence { account: String },
-    #[error("account {account} needs {var}, which has no stored value")]
-    MissingSecret { account: String, var: String },
-    #[error("secret store failed: {0}")]
-    Store(#[from] crate::secrets::SecretError),
-    #[error("{0}")]
-    Value(#[from] crate::sources::ValueError),
+    #[error(transparent)]
+    Token(#[from] TokenError),
 }
 
 /// One request from git, as key/value lines.
@@ -89,37 +82,14 @@ pub struct Credential {
 /// identify an account.
 pub fn respond(
     config: &Config,
-    backend: &dyn Backend,
     runner: &dyn Runner,
     request: &Request,
     cwd: Option<&Path>,
 ) -> Result<Credential, CredentialError> {
     let account = choose_account(config, request, cwd)?;
-
-    let var =
-        account
-            .git_credential
-            .as_deref()
-            .ok_or_else(|| CredentialError::NoCredentialVariable {
-                account: account.name.clone(),
-            })?;
-
-    // Wherever the account says this variable lives -- the store, or a tool
-    // already holding it. A declared source that cannot answer surfaces as its
-    // own error rather than as an absence, so it can never be mistaken for
-    // "nothing stored yet".
-    let password = sources::value_for(backend, runner, account, var)?.ok_or_else(|| {
-        // Loudly, and without falling back to any other account's token: a
-        // working-but-wrong credential is the failure this project exists to
-        // remove (R8).
-        CredentialError::MissingSecret {
-            account: account.name.clone(),
-            var: var.to_string(),
-        }
-    })?;
-
+    let password = sources::token(runner, &account.token_owner())?;
     Ok(Credential {
-        username: account.name.clone(),
+        username: account.login.clone(),
         password,
     })
 }

@@ -1,5 +1,8 @@
 use std::process::Command;
 
+mod common;
+use common::FakeTools;
+
 const ACCOUNTS: &str = r#"
     [defaults]
     account = "Personal"
@@ -7,29 +10,22 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
     paths = ["PLACEHOLDER_ROOT"]
-    env = ["GH_TOKEN"]
 
     [[accounts]]
     name = "BrandNew"
     provider = "github"
+    login = "brandnew"
     email = "new@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/BrandNewOrg/**"]
-    env = ["GH_TOKEN"]
-"#;
-
-/// Reports whether it was handed a token, without ever printing one (R10).
-const FAKE_GH: &str = r#"#!/bin/sh
-if [ -n "$GH_TOKEN" ]; then echo "GH_TOKEN: set"; else echo "GH_TOKEN: unset"; fi
-echo "args: $*"
 "#;
 
 struct Fixture {
     dir: tempfile::TempDir,
+    fakes: FakeTools,
 }
 
 impl Fixture {
@@ -41,41 +37,11 @@ impl Fixture {
         )
         .unwrap();
 
-        let bin = dir.path().join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        for tool in ["gh", "tea"] {
-            std::fs::write(bin.join(tool), FAKE_GH).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(bin.join(tool), std::fs::Permissions::from_mode(0o755))
-                    .unwrap();
-            }
-        }
+        let fakes = FakeTools::new();
+        // BrandNew deliberately has no gh login.
+        fakes.gh_login("personal", "personal-token");
 
-        let fixture = Self { dir };
-        fixture.run(&["secret", "init"], None);
-        fixture.store("Personal", "GH_TOKEN", "personal-token");
-        fixture
-    }
-
-    fn store(&self, account: &str, var: &str, value: &str) {
-        use std::io::Write;
-        use std::process::Stdio;
-        let mut child = self
-            .command(&["secret", "set", account, var], None)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(format!("{value}\n").as_bytes())
-            .unwrap();
-        child.wait().unwrap();
+        Self { dir, fakes }
     }
 
     fn command(&self, args: &[&str], inherited_token: Option<&str>) -> Command {
@@ -83,17 +49,8 @@ impl Fixture {
         cmd.args(args)
             .current_dir(self.dir.path())
             .env("GITWHO_CONFIG", self.dir.path().join("accounts.toml"))
-            .env("GITWHO_SECRETS", self.dir.path().join("secrets.age"))
-            .env("GITWHO_IDENTITY", self.dir.path().join("identity.key"))
             .env_remove("GITWHO_SECRET_BACKEND")
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    self.dir.path().join("bin").display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            );
+            .env("PATH", self.fakes.path());
         match inherited_token {
             Some(token) => cmd.env("GH_TOKEN", token),
             None => cmd.env_remove("GH_TOKEN"),
@@ -202,7 +159,10 @@ fn an_account_with_nothing_stored_still_fails_for_an_ordinary_command() {
     // Running the CLI as nobody in particular would be the quiet-and-wrong
     // outcome; the loud one is correct here.
     assert!(!output.status.success(), "{combined}");
-    assert!(combined.contains("GH_TOKEN"), "{combined}");
+    assert!(
+        combined.contains("BrandNew") && combined.contains("brandnew"),
+        "{combined}"
+    );
 }
 
 #[test]

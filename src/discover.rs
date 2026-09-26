@@ -356,34 +356,39 @@ pub fn gh_logins(runner: &dyn crate::sources::Runner) -> Logins {
     logins
 }
 
-/// The `provider` value a host implies.
-///
-/// A guess, and a harmless one: the field is required by the parser and read by
-/// nothing, so a wrong value changes no behaviour. Emitted anyway because a
-/// config that will not parse is no use to anyone.
-fn provider_for(host: &str) -> &'static str {
+/// The `provider` value a host implies, or `None` when gitwho does not
+/// support it -- gitlab and azure are recognised only to be left out, since
+/// proposing a provider gitwho cannot read a token from would look like a
+/// finished config that then fails at `exec`.
+fn provider_for(host: &str) -> Option<&'static str> {
     let h = host.to_ascii_lowercase();
     if h.contains("github") {
-        "github"
-    } else if h.contains("gitlab") {
-        "gitlab"
-    } else if h.contains("azure") || h.contains("visualstudio") {
-        "azure"
+        Some("github")
+    } else if h.contains("gitlab") || h.contains("azure") || h.contains("visualstudio") {
+        None
     } else {
         // Gitea and Forgejo are the common self-hosted case and `tea` speaks to
         // both. A self-hosted GitLab lands here wrongly and costs nothing.
-        "gitea"
+        Some("gitea")
     }
 }
 
-/// The credential variable a provider's CLI reads.
-fn credential_var(provider: &str) -> &'static str {
-    match provider {
-        "github" => "GH_TOKEN",
-        "gitlab" => "GITLAB_TOKEN",
-        "azure" => "AZURE_DEVOPS_EXT_PAT",
-        _ => "GITEA_TOKEN",
+/// Read `tea login ls -o json` for the logins it holds, as (url, user).
+///
+/// Never reads a token -- this is `init` output a user pipes into a file.
+pub fn tea_logins(runner: &dyn crate::sources::Runner) -> Vec<(String, String)> {
+    #[derive(serde::Deserialize)]
+    struct Listed {
+        url: String,
+        #[serde(default)]
+        user: String,
     }
+    let Ok(Some(captured)) = runner.run("tea", &["login", "ls", "-o", "json"]) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<Listed>>(&captured.stdout)
+        .map(|listed| listed.into_iter().map(|l| (l.url, l.user)).collect())
+        .unwrap_or_default()
 }
 
 /// How many repositories an org needs before it is proposed as an account.
@@ -407,7 +412,7 @@ const LIKELY_OWN_MIN_REPOS: usize = 2;
 /// account is not chosen, and orgs are not merged -- because a config that looks
 /// finished and is subtly wrong is worse than one that obviously needs an editor
 /// passed over it.
-pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins) -> String {
+pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins, tea: &[(String, String)]) -> String {
     let mut out = String::new();
 
     out.push_str("# Proposed by `gitwho init --discover`. Nothing has been written.\n#\n");
@@ -459,8 +464,13 @@ pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins) -> String {
     out.push_str("gitName = \"REPLACE-ME\"\n\n");
 
     for org in &likely_own {
-        let provider = provider_for(&org.host);
-        let var = credential_var(provider);
+        let Some(provider) = provider_for(&org.host) else {
+            out.push_str(&format!(
+                "# gitwho does not support {}; {}/{} is left out.\n\n",
+                org.host, org.host, org.org
+            ));
+            continue;
+        };
 
         out.push_str(&format!(
             "# --- {}/{} {}\n",
@@ -474,29 +484,39 @@ pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins) -> String {
             summarise(&org.repos)
         ));
 
+        let url = format!("https://{}", org.host);
+        let held: Vec<&str> = if provider == "github" {
+            logins
+                .by_host
+                .get(&org.host)
+                .map(|names| names.iter().map(String::as_str).collect())
+                .unwrap_or_default()
+        } else {
+            tea.iter()
+                .filter(|(u, _)| u.trim_end_matches('/').eq_ignore_ascii_case(&url))
+                .map(|(_, user)| user.as_str())
+                .collect()
+        };
+        if !held.is_empty() {
+            let cli = if provider == "github" { "gh" } else { "tea" };
+            out.push_str(&format!(
+                "# {cli} holds: {}. Which one owns this org is the one thing discovery\n\
+                 # cannot know, so set `login` to it yourself.\n",
+                held.join(", ")
+            ));
+        }
+
         out.push_str("[[accounts]]\n");
         out.push_str(&format!("name = \"{}\"\n", org.org));
         out.push_str(&format!("provider = \"{provider}\"\n"));
-        out.push_str("email = \"REPLACE-ME\"\n");
-        out.push_str(&format!("gitCredential = \"{var}\"\n"));
-        out.push_str(&format!("match = [\"{}\"]\n", org.pattern()));
-
-        match logins.by_host.get(&org.host) {
-            Some(names) if !names.is_empty() => {
-                out.push_str(&format!(
-                    "# gh is logged in on {} as: {}.\n\
-                     # Naming one here reads its token on demand, so there is nothing to\n\
-                     # store and nothing to keep in sync. Which one owns this org is the\n\
-                     # one thing discovery cannot know, so pick it yourself:\n\
-                     #   env = [{{ var = \"{var}\", from = \"gh\", user = \"{}\" }}]\n",
-                    org.host,
-                    names.join(", "),
-                    names[0]
-                ));
-            }
-            _ => {}
+        if provider == "gitea" {
+            out.push_str(&format!(
+                "# The API address; check it, an ssh hostname often differs.\nurl = \"{url}\"\n"
+            ));
         }
-        out.push_str(&format!("env = [\"{var}\"]\n\n"));
+        out.push_str("login = \"REPLACE-ME\"\n");
+        out.push_str("email = \"REPLACE-ME\"\n");
+        out.push_str(&format!("match = [\"{}\"]\n\n", org.pattern()));
     }
 
     if !single.is_empty() {

@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
 use gitwho::config::Config;
-use gitwho::exec::plan_env;
-use gitwho::secrets::EnvBackend;
-use gitwho::sources::MapRunner;
+use gitwho::exec::{plan_cleared, plan_env};
+use gitwho::sources::{Captured, MapRunner};
 
-/// Two providers, so one account's variables are another's contamination.
 const ACCOUNTS: &str = r#"
     [defaults]
     account = "Personal"
@@ -13,110 +11,132 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
-    env = ["GH_TOKEN"]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "you"
+    url = "https://git.example.net"
     email = "you@example.net"
-    match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://ssh.git.example.net"]
+    match = ["git.example.net/**"]
 "#;
 
-fn backend() -> EnvBackend {
-    EnvBackend::from_map(HashMap::from([
+fn ok(stdout: &str) -> Captured {
+    Captured {
+        success: true,
+        stdout: stdout.to_string(),
+        stderr: String::new(),
+    }
+}
+
+fn tools() -> MapRunner {
+    MapRunner::new(HashMap::from([
         (
-            "GH_TOKEN_Personal".to_string(),
-            "personal-token".to_string(),
+            MapRunner::key(
+                "gh",
+                &[
+                    "auth",
+                    "token",
+                    "--hostname",
+                    "github.com",
+                    "--user",
+                    "personal",
+                ],
+            ),
+            ok("personal-token\n"),
         ),
         (
-            "GITEA_TOKEN_SelfHosted".to_string(),
-            "gitea-token".to_string(),
+            MapRunner::key("tea", &["login", "ls", "-o", "json"]),
+            ok(r#"[{"name":"acme","url":"https://git.example.net","user":"you"}]"#),
+        ),
+        (
+            MapRunner::key("tea", &["login", "helper", "get"]),
+            ok("protocol=https\nhost=git.example.net\nusername=you\npassword=gitea-token\n"),
         ),
     ]))
 }
 
+fn set_of(plan: &gitwho::exec::EnvPlan) -> Vec<(&str, &str)> {
+    plan.set
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
 #[test]
-fn injects_the_declared_variables_for_the_account() {
+fn a_github_account_gets_its_token_under_every_name_githubs_tools_read() {
     let config = Config::parse(ACCOUNTS).unwrap();
-    let account = config.account("Personal").unwrap();
-
-    let plan = plan_env(&config, &backend(), &no_sources(), account).unwrap();
-
+    let plan = plan_env(&tools(), config.account("Personal").unwrap()).unwrap();
     assert_eq!(
-        plan.set.get("GH_TOKEN").map(String::as_str),
-        Some("personal-token")
+        set_of(&plan),
+        [
+            ("GH_TOKEN", "personal-token"),
+            ("GITHUB_PERSONAL_ACCESS_TOKEN", "personal-token"),
+        ]
     );
 }
 
 #[test]
-fn variables_belonging_to_other_accounts_are_scrubbed() {
-    // Entering a Gitea repo must not leave a GitHub token reachable. The set
-    // of variables to clear comes from the config as a whole, not from the
-    // chosen account -- the account being run knows what it needs, not what
-    // it must be protected from (R11).
+fn a_gitea_account_gets_token_and_url_under_teas_and_gitea_mcps_names() {
     let config = Config::parse(ACCOUNTS).unwrap();
-    let selfhosted = config.account("SelfHosted").unwrap();
-
-    let plan = plan_env(&config, &backend(), &no_sources(), selfhosted).unwrap();
-
-    assert!(
-        plan.remove.contains("GH_TOKEN"),
-        "GH_TOKEN was not scrubbed; remove={:?}",
-        plan.remove
-    );
-    assert!(
-        !plan.set.contains_key("GH_TOKEN"),
-        "a GitHub token was handed to a Gitea account"
-    );
-}
-
-#[test]
-fn a_scrubbed_variable_the_account_needs_is_still_set() {
-    // GITEA_TOKEN appears in the managed set, so it is scrubbed -- and then
-    // set. Order matters: clear everything managed, then populate.
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let selfhosted = config.account("SelfHosted").unwrap();
-
-    let plan = plan_env(&config, &backend(), &no_sources(), selfhosted).unwrap();
-
+    let plan = plan_env(&tools(), config.account("SelfHosted").unwrap()).unwrap();
     assert_eq!(
-        plan.set.get("GITEA_TOKEN").map(String::as_str),
-        Some("gitea-token")
+        set_of(&plan),
+        [
+            ("GITEA_ACCESS_TOKEN", "gitea-token"),
+            ("GITEA_HOST", "https://git.example.net"),
+            ("GITEA_INSTANCE_URL", "https://git.example.net"),
+            ("GITEA_TOKEN", "gitea-token"),
+        ]
     );
-    assert_eq!(
-        plan.set.get("GITEA_INSTANCE_URL").map(String::as_str),
-        Some("https://ssh.git.example.net"),
-        "a literal VAR=value entry should pass through unchanged"
-    );
+}
+
+/// Entering a Gitea repo must not leave a GitHub token reachable, including
+/// the fallbacks gh reads when GH_TOKEN is empty (R11).
+#[test]
+fn every_provider_variable_and_fallback_is_cleared_whichever_account_runs() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let plan = plan_env(&tools(), config.account("SelfHosted").unwrap()).unwrap();
+    for var in [
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+    ] {
+        assert!(
+            plan.remove.contains(var),
+            "{var} not cleared: {:?}",
+            plan.remove
+        );
+        assert!(
+            !plan.set.contains_key(var),
+            "{var} handed to a gitea account"
+        );
+    }
+}
+
+/// Running anyway would leave the CLI to authenticate as whatever it could
+/// find, which is the silent-wrong-account failure (R8).
+#[test]
+fn a_token_the_cli_cannot_supply_refuses_rather_than_running_with_a_gap() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let message = plan_env(
+        &MapRunner::new(HashMap::new()),
+        config.account("Personal").unwrap(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(message.starts_with("Personal"), "{message}");
 }
 
 #[test]
-fn a_missing_secret_refuses_rather_than_running_with_a_gap() {
-    // Running the command anyway would leave the CLI to authenticate as
-    // whatever it could find, which is the silent-wrong-account failure (R8).
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let empty = EnvBackend::from_map(HashMap::new());
-    let account = config.account("Personal").unwrap();
-
-    let error = plan_env(&config, &empty, &no_sources(), account)
-        .expect_err("a missing secret must refuse");
-
-    let message = error.to_string();
-    assert!(
-        message.contains("Personal") && message.contains("GH_TOKEN"),
-        "the error must name the account and variable; got: {message}"
-    );
-}
-
-/// A runner with no answers at all.
-///
-/// None of these accounts reference an external tool, so consulting it would be
-/// a bug -- an empty map turns that into a failing test rather than a silent
-/// success.
-fn no_sources() -> MapRunner {
-    MapRunner::new(HashMap::new())
+fn a_command_that_establishes_credentials_gets_everything_cleared_and_nothing_set() {
+    let plan = plan_cleared();
+    assert!(plan.set.is_empty());
+    for var in ["GH_TOKEN", "GITEA_TOKEN", "GITHUB_TOKEN"] {
+        assert!(plan.remove.contains(var), "{var} not cleared");
+    }
 }

@@ -9,8 +9,8 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     sshKey = "~/.ssh/id_ed25519_personal"
     match = ["github.com/Personal/**"]
     paths = ["/home/someone/src/personal/"]
@@ -18,8 +18,8 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work"
     email = "me@work.example"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/WorkOrg/**"]
 "#;
 
@@ -163,12 +163,15 @@ fn generated_rules_match_a_real_scp_remote_with_a_non_git_user() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "personal@example.com"
         match = ["github.com/Personal/**"]
 
         [[accounts]]
         name = "SelfHosted"
         provider = "gitea"
+        login = "selfhosted"
+        url = "https://ssh.git.example.net"
         email = "you@example.net"
         match = ["ssh.git.example.net/**"]
     "#,
@@ -248,34 +251,6 @@ fn a_credential_section_carries_the_reset_the_helper_and_the_http_path() {
     assert!(
         section.contains("useHttpPath = true"),
         "without useHttpPath the org never reaches the helper and every account on the host resolves the same; got:\n{section}"
-    );
-}
-
-/// R7: an account that only ever uses ssh is not made to invent a token, so it
-/// contributes no credential section at all.
-#[test]
-fn an_account_with_no_git_credential_claims_no_host() {
-    let config = Config::parse(
-        r#"
-        [defaults]
-        account = "SshOnly"
-
-        [[accounts]]
-        name = "SshOnly"
-        provider = "gitea"
-        email = "you@example.net"
-        sshKey = "~/.ssh/id_ed25519_selfhosted"
-        match = ["ssh.git.example.net/**"]
-    "#,
-    )
-    .unwrap();
-
-    let plan = sync::plan(&config, std::path::Path::new("/tmp/git"), BINARY);
-    let creds = file(&plan, "credentials.gitconfig");
-
-    assert!(
-        !creds.contains("ssh.git.example.net"),
-        "an ssh-only account must not be given a credential section; got:\n{creds}"
     );
 }
 

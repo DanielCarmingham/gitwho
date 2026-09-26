@@ -3,7 +3,6 @@ use std::path::Path;
 
 use gitwho::config::Config;
 use gitwho::doctor::{self, GitWiring, Level, Store};
-use gitwho::secrets::{Backend, EnvBackend};
 use gitwho::secrets::{BackendKind, Choice, Source};
 use gitwho::sources::{Captured, MapRunner};
 use tempfile::TempDir;
@@ -16,28 +15,51 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
-    env = ["GH_TOKEN"]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "selfhosted"
+    url = "https://ssh.git.example.net"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 "#;
 
-fn stocked_backend() -> EnvBackend {
-    EnvBackend::from_map(HashMap::from([
+fn ok(stdout: &str) -> Captured {
+    Captured {
+        success: true,
+        stdout: stdout.to_string(),
+        stderr: String::new(),
+    }
+}
+
+/// gh and tea both holding the logins `ACCOUNTS` names.
+fn stocked_runner() -> MapRunner {
+    MapRunner::new(HashMap::from([
         (
-            "GH_TOKEN_Personal".to_string(),
-            "personal-token".to_string(),
+            MapRunner::key(
+                "gh",
+                &[
+                    "auth",
+                    "token",
+                    "--hostname",
+                    "github.com",
+                    "--user",
+                    "personal",
+                ],
+            ),
+            ok("personal-token"),
         ),
         (
-            "GITEA_TOKEN_SelfHosted".to_string(),
-            "gitea-token".to_string(),
+            MapRunner::key("tea", &["login", "ls", "-o", "json"]),
+            ok(r#"[{"name":"sh","url":"https://ssh.git.example.net","user":"selfhosted"}]"#),
+        ),
+        (
+            MapRunner::key("tea", &["login", "helper", "get"]),
+            ok("password=gitea-token\n"),
         ),
     ]))
 }
@@ -123,21 +145,14 @@ fn permission_problems(findings: &[doctor::Finding]) -> Vec<&doctor::Finding> {
 /// ask.
 fn run_with(
     config: &Config,
-    backend: &dyn Backend,
+    runner: &dyn gitwho::sources::Runner,
     ambient: &BTreeMap<String, String>,
     wiring: &GitWiring,
 ) -> Vec<doctor::Finding> {
     // Bound with a `let`: as a temporary it would drop before `run` stats
     // anything, and every path would silently read as nonexistent.
     let dir = hardened_store();
-    doctor::run(
-        config,
-        backend,
-        &no_sources(),
-        ambient,
-        wiring,
-        &store_at(dir.path()),
-    )
+    doctor::run(config, runner, ambient, wiring, &store_at(dir.path()))
 }
 
 #[test]
@@ -146,7 +161,7 @@ fn a_healthy_setup_reports_no_problems() {
 
     let findings = run_with(
         &config,
-        &stocked_backend(),
+        &stocked_runner(),
         &BTreeMap::new(),
         &healthy_wiring(),
     );
@@ -158,28 +173,6 @@ fn a_healthy_setup_reports_no_problems() {
     );
 }
 
-#[test]
-fn a_declared_secret_with_no_stored_value_is_a_problem() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let half_stocked = EnvBackend::from_map(HashMap::from([(
-        "GH_TOKEN_Personal".to_string(),
-        "personal-token".to_string(),
-    )]));
-
-    let findings = run_with(&config, &half_stocked, &BTreeMap::new(), &healthy_wiring());
-
-    let messages: Vec<_> = problems(&findings)
-        .iter()
-        .map(|f| f.message.clone())
-        .collect();
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
-        "the missing secret should be named; got {messages:?}"
-    );
-}
-
 /// The before-picture of the cutover: a managed token sitting in the ambient
 /// environment, inherited by every process launched from that shell.
 #[test]
@@ -187,7 +180,7 @@ fn a_managed_variable_present_in_the_environment_is_reported() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "leaked-token".to_string())]);
 
-    let findings = run_with(&config, &stocked_backend(), &ambient, &healthy_wiring());
+    let findings = run_with(&config, &stocked_runner(), &ambient, &healthy_wiring());
 
     let reported = findings.iter().find(|f| f.message.contains("GH_TOKEN"));
     let reported = reported.expect("an ambient managed variable should be reported");
@@ -210,7 +203,7 @@ fn github_without_use_http_path_is_a_problem() {
         ..GitWiring::default()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings)
         .iter()
@@ -232,7 +225,7 @@ fn a_credential_helper_that_is_not_gitwho_is_a_problem() {
         ..GitWiring::default()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings)
         .iter()
@@ -255,6 +248,7 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "me@example.com"
         match = ["github.com/Personal/**"]
     "#,
@@ -263,7 +257,7 @@ fn a_default_naming_an_undeclared_account_is_a_problem() {
 
     let findings = run_with(
         &config,
-        &stocked_backend(),
+        &stocked_runner(),
         &BTreeMap::new(),
         &healthy_wiring(),
     );
@@ -290,12 +284,14 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "me@example.com"
         match = ["github.com/Shared/**"]
 
         [[accounts]]
         name = "Other"
         provider = "github"
+        login = "other"
         email = "other@example.com"
         match = ["github.com/Shared/**"]
     "#,
@@ -304,7 +300,7 @@ fn two_accounts_claiming_the_same_pattern_is_a_problem() {
 
     let findings = run_with(
         &config,
-        &stocked_backend(),
+        &stocked_runner(),
         &BTreeMap::new(),
         &healthy_wiring(),
     );
@@ -335,24 +331,22 @@ fn a_variable_shared_by_several_accounts_is_reported_once() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "me@example.com"
-        gitCredential = "GH_TOKEN"
         match = ["github.com/Personal/**"]
-        env = ["GH_TOKEN"]
 
         [[accounts]]
         name = "Work"
         provider = "github"
+        login = "work"
         email = "me@work.example"
-        gitCredential = "GH_TOKEN"
         match = ["github.com/WorkOrg/**"]
-        env = ["GH_TOKEN"]
     "#,
     )
     .unwrap();
     let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "leaked".to_string())]);
 
-    let findings = run_with(&config, &stocked_backend(), &ambient, &healthy_wiring());
+    let findings = run_with(&config, &stocked_runner(), &ambient, &healthy_wiring());
 
     let mentions = findings
         .iter()
@@ -377,7 +371,7 @@ fn a_url_scoped_helper_bypassing_gitwho_is_a_problem() {
         ..GitWiring::default()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     let messages: Vec<_> = problems(&findings)
         .iter()
@@ -402,6 +396,7 @@ fn an_account_with_no_author_name_anywhere_is_a_problem() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "me@example.com"
         match = ["github.com/Personal/**"]
     "#,
@@ -410,7 +405,7 @@ fn an_account_with_no_author_name_anywhere_is_a_problem() {
 
     let findings = run_with(
         &config,
-        &stocked_backend(),
+        &stocked_runner(),
         &BTreeMap::new(),
         &healthy_wiring(),
     );
@@ -437,7 +432,6 @@ fn a_hardened_store_reports_no_permission_problems() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -464,7 +458,6 @@ fn a_config_directory_that_is_not_owner_only_is_a_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -496,7 +489,6 @@ fn a_group_or_world_readable_accounts_toml_is_a_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -529,7 +521,6 @@ fn a_permission_finding_says_what_to_run_to_fix_it() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -560,7 +551,6 @@ fn a_readable_identity_key_is_a_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -589,7 +579,6 @@ fn a_readable_secrets_file_is_a_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -622,7 +611,6 @@ fn a_store_owned_by_someone_else_is_a_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -663,7 +651,6 @@ fn a_store_with_no_secrets_file_yet_is_not_a_permission_problem() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -692,7 +679,6 @@ fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -722,7 +708,6 @@ fn doctor_warns_when_owner_only_permissions_cannot_be_enforced() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -751,7 +736,6 @@ fn a_keychain_store_is_not_warned_about_file_permissions() {
 
     let findings = doctor::run(
         &config,
-        &stocked_backend(),
         &no_sources(),
         &BTreeMap::new(),
         &healthy_wiring(),
@@ -773,166 +757,6 @@ fn a_keychain_store_is_not_warned_about_file_permissions() {
 /// success.
 fn no_sources() -> MapRunner {
     MapRunner::new(HashMap::new())
-}
-
-// --- variables read from another tool ---------------------------------------
-
-/// One account whose token lives in gh, one whose token lives in the store.
-const WITH_A_SOURCE: &str = r#"
-    [defaults]
-    account = "Personal"
-    gitName = "Test Person"
-
-    [[accounts]]
-    name = "Personal"
-    provider = "github"
-    email = "me@example.com"
-    gitCredential = "GH_TOKEN"
-    match = ["github.com/Personal/**"]
-    env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
-
-    [[accounts]]
-    name = "SelfHosted"
-    provider = "gitea"
-    email = "you@example.net"
-    match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
-"#;
-
-fn gh_holding(token: &str) -> MapRunner {
-    MapRunner::new(HashMap::from([(
-        MapRunner::key("gh", &["auth", "token", "--user", "octocat"]),
-        Captured {
-            success: true,
-            stdout: token.to_string(),
-            stderr: String::new(),
-        },
-    )]))
-}
-
-fn run_with_sources(
-    config: &Config,
-    backend: &dyn Backend,
-    runner: &dyn gitwho::sources::Runner,
-    ambient: &BTreeMap<String, String>,
-) -> Vec<doctor::Finding> {
-    let dir = hardened_store();
-    doctor::run(
-        config,
-        backend,
-        runner,
-        ambient,
-        &healthy_wiring(),
-        &store_at(dir.path()),
-    )
-}
-
-/// The store holds nothing for GH_TOKEN, and that is correct -- gh holds it.
-/// Reporting it as missing would make a working setup look broken.
-#[test]
-fn a_referenced_variable_is_not_reported_as_missing_from_the_store() {
-    let config = Config::parse(WITH_A_SOURCE).unwrap();
-    let store = EnvBackend::from_map(HashMap::from([(
-        "GITEA_TOKEN_SelfHosted".to_string(),
-        "gitea-token".to_string(),
-    )]));
-
-    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &BTreeMap::new());
-
-    assert!(
-        !findings
-            .iter()
-            .any(|f| f.message.contains("GH_TOKEN has no stored value")),
-        "{findings:#?}"
-    );
-    assert!(problems(&findings).is_empty(), "{findings:#?}");
-}
-
-/// It still has to appear. A credential that silently drops out of the report
-/// is the opposite of what `doctor` is for.
-#[test]
-fn a_referenced_variable_is_reported_with_its_source_and_a_fingerprint() {
-    let config = Config::parse(WITH_A_SOURCE).unwrap();
-    let store = EnvBackend::from_map(HashMap::from([(
-        "GITEA_TOKEN_SelfHosted".to_string(),
-        "gitea-token".to_string(),
-    )]));
-
-    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &BTreeMap::new());
-
-    let line = findings
-        .iter()
-        .find(|f| f.message.starts_with("Personal/GH_TOKEN"))
-        .expect("the referenced variable must be reported");
-
-    assert_eq!(line.level, Level::Ok);
-    assert!(line.message.contains("from gh"), "{}", line.message);
-    // Fingerprint, never the value (R10).
-    assert!(
-        !line.message.contains("gho_live"),
-        "doctor printed the token: {}",
-        line.message
-    );
-    assert!(
-        line.message
-            .contains(&gitwho::secrets::fingerprint("gho_live")),
-        "{}",
-        line.message
-    );
-}
-
-/// The declaration can be perfect while the tool it points at has nothing --
-/// after `gh auth logout`, for instance. That is a problem, not a warning: the
-/// next push would fail.
-#[test]
-fn a_reference_the_tool_cannot_answer_is_a_problem() {
-    let config = Config::parse(WITH_A_SOURCE).unwrap();
-    let store = EnvBackend::from_map(HashMap::from([(
-        "GITEA_TOKEN_SelfHosted".to_string(),
-        "gitea-token".to_string(),
-    )]));
-
-    let findings = run_with_sources(
-        &config,
-        &store,
-        &gh_holding("unused").without("gh"),
-        &BTreeMap::new(),
-    );
-
-    let problem = problems(&findings)
-        .into_iter()
-        .find(|f| f.check == "secrets")
-        .expect("an unanswerable reference must be a problem");
-
-    assert!(problem.message.contains("GH_TOKEN"), "{}", problem.message);
-    assert!(problem.message.contains("gh"), "{}", problem.message);
-}
-
-/// Where the value comes from changes nothing about the hazard: this shell has
-/// already exported one, and every process launched from it inherits that one.
-#[test]
-fn a_referenced_variable_sitting_in_the_environment_still_warns() {
-    let config = Config::parse(WITH_A_SOURCE).unwrap();
-    let store = EnvBackend::from_map(HashMap::from([(
-        "GITEA_TOKEN_SelfHosted".to_string(),
-        "gitea-token".to_string(),
-    )]));
-    let ambient = BTreeMap::from([("GH_TOKEN".to_string(), "gho_ambient".to_string())]);
-
-    let findings = run_with_sources(&config, &store, &gh_holding("gho_live"), &ambient);
-
-    let warning = findings
-        .iter()
-        .find(|f| f.check == "ambient")
-        .expect("an exported GH_TOKEN must still be reported");
-
-    assert_eq!(warning.level, Level::Warn);
-    assert!(warning.message.contains("GH_TOKEN"), "{}", warning.message);
-    assert!(
-        !warning.message.contains("gho_ambient"),
-        "the value must never be printed: {}",
-        warning.message
-    );
 }
 
 /// The two remotes a fork of a mirrored project has: one on each host, owned
@@ -966,7 +790,7 @@ fn remotes_owned_by_two_accounts_are_reported_with_the_one_that_wins() {
         ..healthy_wiring()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     let finding = identity_finding(&findings).expect("two accounts on one repo must be reported");
     assert_eq!(finding.level, Level::Warn);
@@ -997,7 +821,7 @@ fn a_repo_that_pins_its_own_identity_is_left_alone() {
         ..healthy_wiring()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     assert!(
         identity_finding(&findings).is_none(),
@@ -1023,7 +847,7 @@ fn several_remotes_owned_by_one_account_are_not_ambiguous() {
         ..healthy_wiring()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     assert!(
         identity_finding(&findings).is_none(),
@@ -1051,7 +875,7 @@ fn an_unclaimed_remote_alongside_a_claimed_one_is_not_an_identity_conflict() {
         ..healthy_wiring()
     };
 
-    let findings = run_with(&config, &stocked_backend(), &BTreeMap::new(), &wiring);
+    let findings = run_with(&config, &stocked_runner(), &BTreeMap::new(), &wiring);
 
     assert!(
         identity_finding(&findings).is_none(),
@@ -1060,78 +884,52 @@ fn an_unclaimed_remote_alongside_a_claimed_one_is_not_an_identity_conflict() {
     );
 }
 
-fn tea_config(env: &str) -> Config {
-    Config::parse(&format!(
-        r#"
-        [defaults]
-        account = "SelfHosted"
-        gitName = "Test Person"
-
-        [[accounts]]
-        name = "SelfHosted"
-        provider = "gitea"
-        email = "you@example.net"
-        match = ["git.example.net/**"]
-        env = {env}
-    "#
-    ))
-    .unwrap()
-}
-
-fn problem_messages(config: &Config) -> Vec<String> {
+#[test]
+fn every_accounts_token_is_reported_as_a_fingerprint_never_a_value() {
+    let config = Config::parse(ACCOUNTS).unwrap();
     let findings = run_with(
-        config,
-        &stocked_backend(),
+        &config,
+        &stocked_runner(),
         &BTreeMap::new(),
         &healthy_wiring(),
     );
-    problems(&findings)
+    let tokens: Vec<_> = findings.iter().filter(|f| f.check == "tokens").collect();
+    assert_eq!(tokens.len(), 2, "{findings:#?}");
+    assert!(tokens.iter().all(|f| f.level == Level::Ok), "{tokens:#?}");
+    for finding in tokens {
+        assert!(
+            !finding.message.contains("personal-token") && !finding.message.contains("gitea-token"),
+            "doctor printed a token: {}",
+            finding.message
+        );
+    }
+}
+
+#[test]
+fn a_login_the_cli_does_not_hold_is_a_problem_that_says_what_to_run() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let findings = run_with(&config, &no_sources(), &BTreeMap::new(), &healthy_wiring());
+    let messages: Vec<_> = problems(&findings)
         .iter()
         .map(|f| f.message.clone())
-        .collect()
-}
-
-#[test]
-fn a_gitea_token_without_an_instance_url_is_a_problem() {
-    // tea builds a login from the environment only when it has both. With the
-    // token alone it quietly uses whatever login its own config holds, which
-    // may be a different account entirely. Seen for real: a config declaring
-    // GITEA_HOST, a name tea never reads.
-    let config = tea_config(r#"["GITEA_TOKEN", "GITEA_HOST=https://git.example.net"]"#);
-
-    let messages = problem_messages(&config);
+        .collect();
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_INSTANCE_URL")),
-        "the missing URL should be named; got {messages:?}"
+            .any(|m| m.contains("Personal") && m.contains("gh auth login")),
+        "{messages:?}"
     );
 }
 
+/// gh reads GITHUB_TOKEN when GH_TOKEN is empty, though no account names it.
 #[test]
-fn a_gitea_instance_url_without_a_token_is_a_problem() {
-    let config = tea_config(r#"["GITEA_INSTANCE_URL=https://git.example.net"]"#);
-
-    let messages = problem_messages(&config);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("SelfHosted") && m.contains("GITEA_TOKEN")),
-        "the missing token should be named; got {messages:?}"
-    );
-}
-
-#[test]
-fn gitea_mcp_variables_beside_teas_are_not_a_problem() {
-    // gitea-mcp reads GITEA_HOST and GITEA_ACCESS_TOKEN. Declaring them next to
-    // tea's pair is how one account serves both, not a misspelling.
-    let config = tea_config(
-        r#"["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net", "GITEA_HOST=https://git.example.net"]"#,
-    );
-
-    let messages = problem_messages(&config);
-    assert!(
-        !messages.iter().any(|m| m.contains("GITEA")),
-        "a complete tea pair should raise nothing; got {messages:?}"
-    );
+fn a_fallback_variable_in_the_environment_is_reported() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let ambient = BTreeMap::from([("GITHUB_TOKEN".to_string(), "leaked".to_string())]);
+    let findings = run_with(&config, &stocked_runner(), &ambient, &healthy_wiring());
+    let warned = findings
+        .iter()
+        .find(|f| f.level == Level::Warn && f.message.contains("GITHUB_TOKEN"))
+        .expect("an ambient fallback variable should be reported");
+    assert!(!warned.message.contains("leaked"), "{}", warned.message);
 }

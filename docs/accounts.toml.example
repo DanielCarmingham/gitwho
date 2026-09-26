@@ -1,17 +1,16 @@
 # Starting point for ~/.config/gitwho/accounts.toml.
 #
-# Replace every value below. The three accounts here are archetypes, not
-# defaults: a personal account, a work account distinguished by organisation
-# rather than by host, and a self-hosted Gitea/Forgejo account that uses ssh
-# and https at the same time.
+# Replace every value below. The three accounts are archetypes, not defaults:
+# a personal account, a work account told apart by organisation rather than by
+# host, and a self-hosted Gitea/Forgejo account that uses ssh and https at once.
 #
-# Contains no secrets, and must not. `env` and `gitCredential` name variables;
-# the values live in the secret store (`gitwho secret set`). That separation is
-# what lets this file be committed to a dotfiles repo.
+# Contains no secrets, and never needs any. Each account names the login its
+# provider's CLI holds (`gh` or `tea`); gitwho asks that CLI for the token when
+# it is needed. That is what lets this file be committed to a dotfiles repo.
 #
 # Copy it into place with mode 0600:
 #
-#     gitwho secret init
+#     mkdir -p ~/.config/gitwho && chmod 700 ~/.config/gitwho
 #     cp docs/accounts.toml.example ~/.config/gitwho/accounts.toml
 #     chmod 600 ~/.config/gitwho/accounts.toml
 #
@@ -20,130 +19,75 @@
 # handed one of your tokens.
 
 [defaults]
-# Used when nothing else matches. Declared rather than emergent -- a repo that
-# matches no account resolves here and is tagged `Unmatched`, which `gh` will
-# work with while the credential helper refuses. That asymmetry is deliberate:
-# a wrong account served quietly is the failure this tool exists to prevent.
+# Used when nothing else matches. A repo that matches no account resolves here
+# and is tagged `Unmatched`: `gh` works with it while the credential helper
+# refuses, because a wrong account served quietly is the failure this tool
+# exists to prevent.
 account = "Personal"
 
-# The author name for every account that does not override it. It is usually
-# the same person throughout and only the address differs, so it lives here
-# once. An account with neither this nor its own `gitName` generates an empty
-# `name = `, which makes every commit in that repo fail; `doctor` checks for it.
+# The author name for every account that does not set its own `gitName`.
 gitName = "Your Name"
-
-# Which store holds the values on this machine: `age` (default, everywhere) or
-# `keychain`. Leave it unset unless you have run examples/keychain_probe.rs and
-# confirmed the platform store does not re-prompt after a rebuild.
-# secretBackend = "age"
 
 
 # --- A personal account ------------------------------------------------------
 
 [[accounts]]
 name = "Personal"
-# Required by the parser, but currently read by nothing: `mcp sync` recognises
-# provider servers from their command, not from this field. Write the obvious
-# value and do not expect it to change any behaviour.
+# `github` or `gitea` (`forgejo` means the same). The provider decides which
+# variables `exec` sets -- GH_TOKEN and GITHUB_PERSONAL_ACCESS_TOKEN here -- so
+# no variable is ever named in this file.
 provider = "github"
+# The gh login this account's token is held under: `gh auth token --user`.
+login = "your-username"
 email = "you@example.com"
-
-# Names the variable holding the token git authenticates with. Not inferred
-# from `provider`, because an account may hold several credentials and guessing
-# which one is the git password is exactly the kind of implicit behaviour that
-# goes wrong quietly.
-gitCredential = "GH_TOKEN"
-
-# Written into `core.sshcommand` for this account. Optional and independent of
-# `gitCredential` -- an account may have both, either, or neither.
+# Written into `core.sshcommand` for ssh remotes. Optional.
 sshKey = "~/.ssh/id_ed25519_personal"
-
-# The real work. Matched against `host/path` of the remote URL, so this is what
-# makes identity follow the *repository* rather than its location: it holds for
-# a clone made anywhere and for a worktree in a foreign root.
+# Matched against `host/path` of the remote URL, so identity follows the
+# repository rather than where it sits on disk.
 match = ["github.com/your-username/**"]
-
-# What `gitwho exec` injects, and therefore what the `gh`/`tea` shims see. A
-# bare NAME fetches a secret from the store; NAME=value is a literal, for
-# non-secret settings; a table reads the value from a tool that already has it.
-env = ["GH_TOKEN"]
-
-# Consulted **only** for a repo with no remote yet -- a fresh `git init`.
-# Anything with a remote is settled by `match` above, so these prefixes do not
-# constrain where you keep your repositories.
+# Consulted only for a repo with no remote yet -- a fresh `git init`.
 paths = ["~/src/personal/"]
 
 
 # --- A work account on the same host -----------------------------------------
 #
-# This is the case path-based `includeIf "gitdir:"` rules cannot express: two
-# accounts on github.com, told apart by organisation. Because `match` runs
-# against `host/path`, listing the orgs is enough -- no directory layout is
-# implied and none is required.
+# Two accounts on github.com, told apart by organisation. gh holds both logins
+# at once and `--user` picks one without `gh auth switch`, so nothing global
+# changes.
 
 [[accounts]]
 name = "Work"
 provider = "github"
+login = "your-work-username"
 email = "you@example-corp.com"
-gitName = "Your Name (Example Corp)"      # overrides [defaults] gitName
-gitCredential = "GH_TOKEN"
+gitName = "Your Name (Example Corp)"
 match = [
     "github.com/example-corp/**",
     "github.com/example-corp-labs/**",
 ]
-
-# This account reads its token from `gh` instead of storing one, so there is no
-# `gitwho secret set` step for it and nothing to update when you rotate.
-#
-# It is a pointer, not a copy. That distinction is the point: a copy is correct
-# until the day you run `gh auth refresh`, after which gitwho holds a token that
-# is present, decryptable and wrong -- which is the failure this tool exists to
-# prevent, not one it should introduce.
-#
-#   from  the tool to ask. Only `gh` today.
-#   user  which of its accounts. Passed as `gh auth token --user`, which reads
-#         that account without `gh auth switch`, so nothing global is mutated.
-#         Omit it and you get whichever account gh currently considers active,
-#         which is only ever right by luck on a multi-account machine.
-#   host  optional; omit it and gh uses its own default host.
-#
-# Costs a process spawn -- about 60 ms against about 10 ms for a stored value --
-# so it is worth declaring per variable rather than everywhere out of habit.
-# If gh cannot answer, gitwho fails and says so. It never quietly falls back to
-# a stored value.
-env = [{ var = "GH_TOKEN", from = "gh", user = "your-work-username" }]
 paths = ["~/src/work/"]
 
 
 # --- A self-hosted Gitea / Forgejo account -----------------------------------
 #
-# Two hostnames, one account. Transport is a property of a *remote*, not of an
-# account: git picks it per remote, and a credential helper is only ever
-# consulted for https. So an account that pushes over ssh to one hostname and
-# calls the API over https on another needs no special case, and there is no
-# `gitAuth` field to set.
+# Two hostnames, one account: ssh for push/pull on one, the API over https on
+# the other. Transport is a property of a remote, so that needs no special
+# case. `exec` sets GITEA_TOKEN + GITEA_INSTANCE_URL for tea and
+# GITEA_ACCESS_TOKEN + GITEA_HOST for gitea-mcp, all from this one account.
 #
-# Drop `gitCredential` entirely for an account that never uses https. A
-# key-authenticated account is not made to invent a token it does not use.
+# tea hands out the first login it holds for a server whatever user is asked
+# for, so gitwho requires exactly one tea login for `url`, belonging to `login`.
+# Two accounts on one Gitea server are therefore not supported.
 
 [[accounts]]
 name = "SelfHosted"
-provider = "gitea"          # Forgejo is a Gitea fork; `tea` speaks to both
+provider = "gitea"
+url = "https://git.example.net"
+login = "you"
 email = "you@example.net"
-gitCredential = "GITEA_TOKEN"
 sshKey = "~/.ssh/id_ed25519_selfhosted"
 match = [
     "git.example.net/**",
     "ssh.git.example.net/**",
 ]
-# `tea` needs the instance's base URL as well as its token, and only under
-# these two names: given both, it builds a login from the environment that
-# overrides any login in its own config. It never reads `GITEA_HOST` -- set
-# that instead and tea silently uses its stored login, not this account.
-# `doctor` reports an account that declares only one of the pair. The URL is
-# not a secret, so it is written literally here rather than stored.
-#
-# gitea-mcp reads different names: `GITEA_HOST` and `GITEA_ACCESS_TOKEN`. An
-# account whose MCP server is wrapped by `gitwho mcp sync` declares those too.
-env = ["GITEA_TOKEN", "GITEA_INSTANCE_URL=https://git.example.net"]
 paths = ["~/src/selfhosted/"]

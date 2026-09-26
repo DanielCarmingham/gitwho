@@ -65,17 +65,13 @@ const CREDENTIALS_FILE: &str = "credentials.gitconfig";
 
 /// The hosts gitwho serves credentials for, in declaration order, deduplicated.
 ///
-/// Only accounts that declare a `gitCredential` contribute. An account that
-/// only ever uses ssh has no token to serve, and claiming its host would mean
-/// answering a fill request with nothing -- which reads to git as a failure
-/// rather than as "not mine" (R7).
+/// Every account has a token now, so every host an account claims is served.
+/// A hostname only ever used over ssh is harmless here: git consults a
+/// credential helper for https alone.
 fn served_hosts(config: &Config) -> Vec<&str> {
     let mut hosts: Vec<&str> = Vec::new();
 
     for account in &config.accounts {
-        if account.git_credential.is_none() {
-            continue;
-        }
         for pattern in &account.match_patterns {
             let host = pattern.split('/').next().unwrap_or(pattern);
             if !host.is_empty() && !hosts.contains(&host) {

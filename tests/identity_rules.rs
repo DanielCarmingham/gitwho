@@ -20,15 +20,16 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "selfhosted"
+    url = "https://git.example.net"
     email = "you@example.net"
-    gitCredential = "GITEA_TOKEN"
     match = ["git.example.net/**"]
 "#;
 

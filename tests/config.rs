@@ -19,20 +19,17 @@ fn the_shipped_example_config_parses() {
         config.defaults.account
     );
 
-    // It carries no values, only variable names -- the property that lets it be
+    // It carries no values, only logins -- the property that lets it be
     // committed (R10).
-    for account in &config.accounts {
-        for spec in &account.env {
-            if let Some(value) = spec.literal() {
-                assert!(
-                    !value.to_ascii_lowercase().contains("token"),
-                    "{} declares a literal that looks like a secret: {}={value}",
-                    account.name,
-                    spec.name()
-                );
-            }
-        }
-    }
+    use gitwho::provider::Provider;
+    assert!(config
+        .accounts
+        .iter()
+        .any(|a| a.provider == Provider::Github));
+    assert!(config
+        .accounts
+        .iter()
+        .any(|a| a.provider == Provider::Gitea));
 }
 
 #[test]
@@ -44,6 +41,7 @@ fn parses_an_account_with_its_match_patterns() {
         [[accounts]]
         name = "Personal"
         provider = "github"
+        login = "personal"
         email = "me@example.com"
         match = ["github.com/Personal/**"]
     "#;
@@ -76,8 +74,9 @@ fn an_account_can_use_ssh_and_https_at_once() {
         [[accounts]]
         name = "SelfHosted"
         provider = "gitea"
+        login = "selfhosted"
+        url = "https://ssh.git.example.net"
         email = "you@example.net"
-        gitCredential = "GITEA_TOKEN"
         sshKey = "~/.ssh/id_ed25519_selfhosted"
         match = ["ssh.git.example.net/**", "git.example.net/**"]
     "#,
@@ -85,9 +84,97 @@ fn an_account_can_use_ssh_and_https_at_once() {
     .expect("an account should be able to declare both a token and a key");
 
     let account = config.account("SelfHosted").unwrap();
-    assert_eq!(account.git_credential.as_deref(), Some("GITEA_TOKEN"));
+    assert_eq!(account.url.as_deref(), Some("https://ssh.git.example.net"));
     assert_eq!(
         account.ssh_key.as_deref(),
         Some("~/.ssh/id_ed25519_selfhosted")
+    );
+}
+
+fn parse_err(toml: &str) -> String {
+    Config::parse(toml).unwrap_err().to_string()
+}
+
+const HEAD: &str =
+    "[defaults]\naccount = \"A\"\n\n[[accounts]]\nname = \"A\"\nemail = \"a@example.com\"\n";
+
+#[test]
+fn each_removed_field_is_named_with_what_replaced_it() {
+    let env = parse_err(&format!(
+        "{HEAD}provider = \"github\"\nlogin = \"a\"\nenv = [\"GH_TOKEN\"]\n"
+    ));
+    assert!(
+        env.contains("account A") && env.contains("`env`") && env.contains("login"),
+        "{env}"
+    );
+
+    let cred = parse_err(&format!(
+        "{HEAD}provider = \"github\"\nlogin = \"a\"\ngitCredential = \"GH_TOKEN\"\n"
+    ));
+    assert!(cred.contains("`gitCredential`"), "{cred}");
+
+    let backend = parse_err(
+        "[defaults]\naccount = \"A\"\nsecretBackend = \"age\"\n\n[[accounts]]\nname = \"A\"\nprovider = \"github\"\nlogin = \"a\"\nemail = \"a@example.com\"\n",
+    );
+    assert!(
+        backend.contains("[defaults]") && backend.contains("`secretBackend`"),
+        "{backend}"
+    );
+}
+
+#[test]
+fn gitea_without_a_url_is_rejected() {
+    let message = parse_err(&format!("{HEAD}provider = \"gitea\"\nlogin = \"a\"\n"));
+    assert!(
+        message.contains("account A") && message.contains("url"),
+        "{message}"
+    );
+}
+
+#[test]
+fn github_with_a_url_is_rejected() {
+    let message = parse_err(&format!(
+        "{HEAD}provider = \"github\"\nlogin = \"a\"\nurl = \"https://github.example.com\"\n"
+    ));
+    assert!(message.contains("github.com"), "{message}");
+}
+
+#[test]
+fn an_account_without_a_login_is_rejected() {
+    let message = parse_err(&format!("{HEAD}provider = \"github\"\n"));
+    assert!(message.contains("login"), "{message}");
+}
+
+#[test]
+fn an_account_with_an_empty_login_is_rejected() {
+    let message = parse_err(&format!("{HEAD}provider = \"github\"\nlogin = \"\"\n"));
+    assert!(
+        message.contains("account A") && message.contains("login"),
+        "{message}"
+    );
+}
+
+#[test]
+fn an_account_with_a_blank_login_is_rejected() {
+    let message = parse_err(&format!("{HEAD}provider = \"github\"\nlogin = \"  \"\n"));
+    assert!(
+        message.contains("account A") && message.contains("login"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_forgejo_account_parses_as_gitea() {
+    let config = Config::parse(&format!(
+        "{HEAD}provider = \"forgejo\"\nlogin = \"a\"\nurl = \"https://git.example.net\"\n"
+    ))
+    .unwrap();
+    assert_eq!(
+        config.accounts[0].provider,
+        gitwho::provider::Provider::Gitea
+    );
+    assert_eq!(
+        config.accounts[0].url.as_deref(),
+        Some("https://git.example.net")
     );
 }

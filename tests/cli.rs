@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use gitwho::secrets::{AgeFileBackend, Backend};
+mod common;
+use common::FakeTools;
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -10,29 +11,25 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work"
     email = "me@work.example"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/WorkOrg/**"]
 "#;
 
-/// A config directory with two accounts and a token stored for each.
-fn fixture(dir: &Path) {
+/// A config directory with two accounts and gh holding a token for each.
+fn fixture(dir: &Path) -> FakeTools {
     std::fs::write(dir.join("accounts.toml"), ACCOUNTS).unwrap();
-
-    let key_path = dir.join("identity.key");
-    AgeFileBackend::generate_identity_file(&key_path).unwrap();
-    let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
-    backend
-        .set("Personal", "GH_TOKEN", "personal-token")
-        .unwrap();
-    backend.set("Work", "GH_TOKEN", "work-token").unwrap();
+    let fakes = FakeTools::new();
+    fakes.gh_login("personal", "personal-token");
+    fakes.gh_login("work", "work-token");
+    fakes
 }
 
 /// Ask real git to fill a credential, with gitwho configured as the helper.
@@ -40,11 +37,11 @@ fn fixture(dir: &Path) {
 /// This is the end-to-end proof: git decides when and how to call the helper,
 /// so a passing result means the protocol is genuinely understood, not just
 /// our idea of it.
-fn git_credential_fill(dir: &Path, url: &str) -> std::process::Output {
-    git_credential_fill_in(dir, url, dir)
+fn git_credential_fill(dir: &Path, url: &str, path: &str) -> std::process::Output {
+    git_credential_fill_in(dir, url, dir, path)
 }
 
-fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Output {
+fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path, path: &str) -> std::process::Output {
     let helper = format!("{} credential", env!("CARGO_BIN_EXE_gitwho"));
 
     let mut child = Command::new("git")
@@ -69,6 +66,7 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Ou
         .env("GITWHO_SECRETS", dir.join("secrets.age"))
         .env("GITWHO_IDENTITY", dir.join("identity.key"))
         .env_remove("GITWHO_SECRET_BACKEND")
+        .env("PATH", path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -89,9 +87,13 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path) -> std::process::Ou
 #[test]
 fn git_asks_gitwho_and_gets_the_token_for_that_org() {
     let dir = tempfile::tempdir().unwrap();
-    fixture(dir.path());
+    let fakes = fixture(dir.path());
 
-    let output = git_credential_fill(dir.path(), "https://github.com/WorkOrg/thing.git");
+    let output = git_credential_fill(
+        dir.path(),
+        "https://github.com/WorkOrg/thing.git",
+        &fakes.path(),
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
@@ -106,9 +108,13 @@ fn the_same_git_command_picks_a_different_account_for_a_different_org() {
     // Same host, same working directory, same invocation -- only the URL
     // differs. This is R3, and it is what filesystem-path rules cannot do.
     let dir = tempfile::tempdir().unwrap();
-    fixture(dir.path());
+    let fakes = fixture(dir.path());
 
-    let output = git_credential_fill(dir.path(), "https://github.com/Personal/thing.git");
+    let output = git_credential_fill(
+        dir.path(),
+        "https://github.com/Personal/thing.git",
+        &fakes.path(),
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
@@ -124,7 +130,7 @@ fn the_url_wins_over_the_working_directory() {
     // Anything keyed on filesystem location answers "Personal" here. This is
     // the whole thesis of the project, end to end (R1, R2).
     let dir = tempfile::tempdir().unwrap();
-    fixture(dir.path());
+    let fakes = fixture(dir.path());
 
     let personal_repo = dir.path().join("a-personal-repo");
     std::fs::create_dir(&personal_repo).unwrap();
@@ -150,6 +156,7 @@ fn the_url_wins_over_the_working_directory() {
         dir.path(),
         "https://github.com/WorkOrg/thing.git",
         &personal_repo,
+        &fakes.path(),
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -165,9 +172,13 @@ fn an_unclaimed_host_gets_no_credential_from_the_real_binary() {
     // End-to-end R11: git must come away with nothing, not with whichever
     // token happened to be lying around.
     let dir = tempfile::tempdir().unwrap();
-    fixture(dir.path());
+    let fakes = fixture(dir.path());
 
-    let output = git_credential_fill(dir.path(), "https://evil.example.com/someone/repo.git");
+    let output = git_credential_fill(
+        dir.path(),
+        "https://evil.example.com/someone/repo.git",
+        &fakes.path(),
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
@@ -196,12 +207,13 @@ fn a_non_unicode_variable_elsewhere_in_the_environment_is_ignored() {
     let home = tempfile::tempdir().unwrap();
     let store = home.path().join(".config").join("gitwho");
     std::fs::create_dir_all(&store).unwrap();
-    fixture(&store);
+    let fakes = fixture(&store);
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_gitwho"));
     command
         .args(["credential", "get"])
         .env("HOME", home.path())
+        .env("PATH", fakes.path())
         // Not valid UTF-8, and nothing to do with gitwho.
         .env(
             "GITWHO_TEST_BYSTANDER",
@@ -248,30 +260,30 @@ const EXEC_ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
-    env = ["GH_TOKEN"]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "selfhosted"
+    url = "https://ssh.git.example.net"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
-    env = ["GITEA_TOKEN"]
 "#;
 
-fn exec_fixture(dir: &Path) {
+fn exec_fixture(dir: &Path) -> FakeTools {
     std::fs::write(dir.join("accounts.toml"), EXEC_ACCOUNTS).unwrap();
-    let key_path = dir.join("identity.key");
-    AgeFileBackend::generate_identity_file(&key_path).unwrap();
-    let backend = AgeFileBackend::with_identity_file(dir.join("secrets.age"), &key_path).unwrap();
-    backend
-        .set("Personal", "GH_TOKEN", "personal-token")
-        .unwrap();
-    backend
-        .set("SelfHosted", "GITEA_TOKEN", "gitea-token")
-        .unwrap();
+    let fakes = FakeTools::new();
+    fakes.gh_login("personal", "personal-token");
+    fakes.tea_login(
+        "sh",
+        "https://ssh.git.example.net",
+        "selfhosted",
+        "gitea-token",
+    );
+    fakes
 }
 
 fn repo_for(dir: &Path, name: &str, origin: &str) -> std::path::PathBuf {
@@ -297,7 +309,7 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
     // The scenario the project exists for: a GitHub token is already loaded in
     // the shell, and a Gitea tool is launched. The child must not see it (R11).
     let dir = tempfile::tempdir().unwrap();
-    exec_fixture(dir.path());
+    let fakes = exec_fixture(dir.path());
     let repo = repo_for(
         dir.path(),
         "selfhosted-repo",
@@ -312,6 +324,7 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
         .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
         .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
+        .env("PATH", fakes.path())
         .output()
         .unwrap();
 
@@ -333,7 +346,7 @@ fn a_generated_shim_routes_a_cli_through_exec() {
     // wrapping every call site by hand. Using `env` as the stand-in CLI lets
     // the test see exactly what the wrapped process received.
     let dir = tempfile::tempdir().unwrap();
-    exec_fixture(dir.path());
+    let fakes = exec_fixture(dir.path());
     let repo = repo_for(
         dir.path(),
         "selfhosted-repo",
@@ -362,14 +375,7 @@ fn a_generated_shim_routes_a_cli_through_exec() {
         .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
         .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                shim_dir.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
+        .env("PATH", format!("{}:{}", shim_dir.display(), fakes.path()))
         .output()
         .unwrap();
 
@@ -392,7 +398,7 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
     // default account -- and should mention that nothing claimed the remote,
     // since that is also what a forgotten pattern looks like.
     let dir = tempfile::tempdir().unwrap();
-    exec_fixture(dir.path());
+    let fakes = exec_fixture(dir.path());
     let repo = repo_for(
         dir.path(),
         "someone-elses-repo",
@@ -406,6 +412,7 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
         .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
         .env_remove("GITWHO_SECRET_BACKEND")
+        .env("PATH", fakes.path())
         .output()
         .unwrap();
 
@@ -443,6 +450,7 @@ fn a_missing_home_does_not_read_config_from_the_working_directory() {
         [[accounts]]
         name = "Ambush"
         provider = "github"
+        login = "ambush"
         email = "someone@else.example"
         match = ["github.com/**"]
     "#,
@@ -501,7 +509,7 @@ fn doctor_reports_a_world_readable_config_file() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempfile::tempdir().unwrap();
-    fixture(dir.path());
+    let fakes = fixture(dir.path());
     std::fs::set_permissions(
         dir.path().join("accounts.toml"),
         std::fs::Permissions::from_mode(0o644),
@@ -519,6 +527,7 @@ fn doctor_reports_a_world_readable_config_file() {
         .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
         .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
         .env_remove("GITWHO_SECRET_BACKEND")
+        .env("PATH", fakes.path())
         .output()
         .unwrap();
 

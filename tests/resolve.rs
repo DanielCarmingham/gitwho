@@ -10,12 +10,14 @@ const TWO_GITHUB_ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work"
     email = "me@work.example"
     match = ["github.com/WorkOrg/**"]
 "#;
@@ -29,12 +31,15 @@ const SSH_ACCOUNT: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "SelfHosted"
     provider = "gitea"
+    login = "selfhosted"
+    url = "https://ssh.git.example.net"
     email = "you@example.net"
     match = ["ssh.git.example.net/**"]
 "#;
@@ -49,12 +54,14 @@ const OVERLAPPING_ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Acme"
     provider = "github"
+    login = "acme"
     email = "you@acme.example"
     match = ["github.com/acme-*/**"]
 
     [[accounts]]
     name = "AcmeKitchen"
     provider = "github"
+    login = "acmekitchen"
     email = "you@kitchen.example"
     match = ["github.com/acme-kitchen/**"]
 "#;
@@ -68,12 +75,14 @@ const AMBIGUOUS_ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal"
     email = "me@example.com"
     match = ["github.com/Shared/**"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work"
     email = "me@work.example"
     match = ["github.com/Shared/**"]
 "#;

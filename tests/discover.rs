@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gitwho::discover::{gh_logins, render, scan, Limits, Logins, Remotes};
+use gitwho::discover::{gh_logins, render, scan, Limits, Logins, Org, Remotes, Scan};
 use gitwho::sources::{Captured, MapRunner};
 
 /// Answers from a fixed map of directory to origin URL. A directory with no
@@ -262,7 +262,7 @@ fn skipped_directories_are_not_walked() {
 
 fn rendered(tree: &Tree, logins: &Logins) -> String {
     let found = tree.scan();
-    render(&found, &[tree.root.path().to_path_buf()], logins)
+    render(&found, &[tree.root.path().to_path_buf()], logins, &[])
 }
 
 #[test]
@@ -398,10 +398,10 @@ fn gh_accounts_are_offered_as_a_choice_not_assigned() {
     let text = rendered(&tree, &logins);
 
     assert!(text.contains("octocat, octocat-work"), "{text}");
-    assert!(text.contains("from = \"gh\""), "{text}");
-    // The live declaration stays the store-backed one: choosing between two gh
-    // accounts is the user's call, so the reference is shown commented out.
-    assert!(text.contains("env = [\"GH_TOKEN\"]"), "{text}");
+    assert!(text.contains("gh holds:"), "{text}");
+    // Which gh login owns this org is the user's call, so the account still
+    // needs its `login` filled in rather than one being assigned.
+    assert!(text.contains("login = \"REPLACE-ME\""), "{text}");
 }
 
 #[test]
@@ -492,4 +492,48 @@ github.com
         Some(["good".to_string()].as_slice()),
         "a failed login must not be suggested"
     );
+}
+
+/// One org with `repos` repositories, enough to be proposed at 2 or more.
+fn scan_of(host: &str, org: &str, repos: usize) -> Scan {
+    Scan {
+        orgs: vec![Org {
+            host: host.to_string(),
+            org: org.to_string(),
+            repos: (0..repos).map(|i| format!("repo{i}")).collect(),
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_proposed_account_parses_once_its_placeholders_are_filled() {
+    let scan = scan_of("github.com", "acme-corp", 3);
+    let text = gitwho::discover::render(&scan, &[], &Default::default(), &[])
+        .replace("REPLACE-ME", "acme-corp");
+    let config = gitwho::config::Config::parse(&text).unwrap();
+    assert_eq!(config.accounts[0].login, "acme-corp");
+}
+
+#[test]
+fn a_gitea_org_is_proposed_with_a_url_and_the_tea_logins_for_it() {
+    let scan = scan_of("git.example.net", "acme", 3);
+    let tea = vec![("https://git.example.net".to_string(), "you".to_string())];
+    let text = gitwho::discover::render(&scan, &[], &Default::default(), &tea);
+    assert!(text.contains("provider = \"gitea\""), "{text}");
+    assert!(text.contains("url = \"https://git.example.net\""), "{text}");
+    assert!(text.contains("tea holds: you"), "{text}");
+    assert!(!text.contains("env ="), "{text}");
+    assert!(!text.contains("gitCredential"), "{text}");
+}
+
+#[test]
+fn an_unsupported_provider_is_proposed_commented_out() {
+    let scan = scan_of("gitlab.com", "acme", 3);
+    let text = gitwho::discover::render(&scan, &[], &Default::default(), &[]);
+    assert!(
+        text.contains("# gitwho does not support gitlab.com"),
+        "{text}"
+    );
+    assert!(!text.contains("\n[[accounts]]\nname = \"acme\""), "{text}");
 }

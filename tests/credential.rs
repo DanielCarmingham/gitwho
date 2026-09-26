@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use gitwho::config::Config;
 use gitwho::credential::{respond, Request};
-use gitwho::secrets::EnvBackend;
-use gitwho::sources::MapRunner;
+use gitwho::sources::{Captured, MapRunner};
 
 const ACCOUNTS: &str = r#"
     [defaults]
@@ -12,26 +11,45 @@ const ACCOUNTS: &str = r#"
     [[accounts]]
     name = "Personal"
     provider = "github"
+    login = "personal-login"
     email = "me@example.com"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/Personal/**"]
 
     [[accounts]]
     name = "Work"
     provider = "github"
+    login = "work-login"
     email = "me@work.example"
-    gitCredential = "GH_TOKEN"
     match = ["github.com/WorkOrg/**"]
 "#;
 
-fn backend() -> EnvBackend {
-    EnvBackend::from_map(HashMap::from([
-        (
-            "GH_TOKEN_Personal".to_string(),
-            "personal-token".to_string(),
-        ),
-        ("GH_TOKEN_Work".to_string(), "work-token".to_string()),
+fn ok(stdout: &str) -> Captured {
+    Captured {
+        success: true,
+        stdout: stdout.to_string(),
+        stderr: String::new(),
+    }
+}
+
+fn gh_key(login: &str) -> String {
+    MapRunner::key(
+        "gh",
+        &["auth", "token", "--hostname", "github.com", "--user", login],
+    )
+}
+
+fn tools() -> MapRunner {
+    MapRunner::new(HashMap::from([
+        (gh_key("personal-login"), ok("personal-token")),
+        (gh_key("work-login"), ok("work-token")),
     ]))
+}
+
+fn only_personal() -> MapRunner {
+    MapRunner::new(HashMap::from([(
+        gh_key("personal-login"),
+        ok("personal-token"),
+    )]))
 }
 
 /// git speaks a line-oriented protocol on stdin, terminated by a blank line.
@@ -42,26 +60,22 @@ fn answers_a_request_with_the_token_for_the_org_in_the_url() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\nhost=github.com\npath=WorkOrg/thing.git\n");
 
-    let credential = respond(&config, &backend(), &no_sources(), &request, None).unwrap();
+    let credential = respond(&config, &tools(), &request, None).unwrap();
 
     assert_eq!(credential.password, "work-token");
 }
 
 #[test]
-fn a_missing_secret_fails_instead_of_falling_back_to_another_account() {
+fn a_login_gh_lacks_fails_instead_of_falling_back_to_another_account() {
     // The exact regression this project exists to remove: an account is
-    // identified correctly, but has no stored token. Handing over the
-    // default account's token here would authenticate as the wrong person
+    // identified correctly, but gh has no token for its login. Handing over
+    // the default account's token here would authenticate as the wrong person
     // while looking like success (R8).
     let config = Config::parse(ACCOUNTS).unwrap();
-    let only_personal = EnvBackend::from_map(HashMap::from([(
-        "GH_TOKEN_Personal".to_string(),
-        "personal-token".to_string(),
-    )]));
     let request = Request::parse("protocol=https\nhost=github.com\npath=WorkOrg/thing.git\n");
 
-    let error = respond(&config, &only_personal, &no_sources(), &request, None)
-        .expect_err("a missing secret must not fall back to another account");
+    let error = respond(&config, &only_personal(), &request, None)
+        .expect_err("a missing login must not fall back to another account");
 
     let message = error.to_string();
     assert!(
@@ -69,8 +83,8 @@ fn a_missing_secret_fails_instead_of_falling_back_to_another_account() {
         "the error leaked another account's token: {message}"
     );
     assert!(
-        message.contains("Work") && message.contains("GH_TOKEN"),
-        "the error must name the account and variable to fix; got: {message}"
+        message.contains("Work") && message.contains("work-login"),
+        "the error must name the account and login to fix; got: {message}"
     );
 }
 
@@ -82,54 +96,13 @@ fn an_unknown_host_gets_no_credential_at_all() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\nhost=evil.example.com\npath=someone/repo.git\n");
 
-    let error = respond(&config, &backend(), &no_sources(), &request, None)
+    let error = respond(&config, &tools(), &request, None)
         .expect_err("an unclaimed host must not receive any token");
 
     let message = error.to_string();
     assert!(
         !message.contains("personal-token") && !message.contains("work-token"),
         "the error leaked a token: {message}"
-    );
-}
-
-/// SelfHosted authenticates git with an ssh key, so no token exists to hand
-/// over -- and requiring one would be inventing a credential that does not
-/// exist (R7).
-const SSH_ACCOUNT: &str = r#"
-    [defaults]
-    account = "Personal"
-
-    [[accounts]]
-    name = "Personal"
-    provider = "github"
-    email = "me@example.com"
-    gitCredential = "GH_TOKEN"
-    match = ["github.com/Personal/**"]
-
-    [[accounts]]
-    name = "SelfHosted"
-    provider = "gitea"
-    email = "you@example.net"
-    match = ["ssh.git.example.net/**"]
-"#;
-
-#[test]
-fn an_ssh_account_is_never_handed_a_token() {
-    let config = Config::parse(SSH_ACCOUNT).unwrap();
-    let request =
-        Request::parse("protocol=https\nhost=ssh.git.example.net\npath=someone/site.git\n");
-
-    let error = respond(&config, &backend(), &no_sources(), &request, None)
-        .expect_err("an ssh account has no token to give");
-
-    let message = error.to_string();
-    assert!(
-        !message.contains("personal-token") && !message.contains("work-token"),
-        "an ssh account was handed another account's token: {message}"
-    );
-    assert!(
-        message.contains("SelfHosted"),
-        "the error should name the account; got: {message}"
     );
 }
 
@@ -151,14 +124,8 @@ fn a_low_confidence_resolution_does_not_release_a_token() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\n");
 
-    let error = respond(
-        &config,
-        &backend(),
-        &no_sources(),
-        &request,
-        Some(dir.path()),
-    )
-    .expect_err("a default-account resolution must not release a token");
+    let error = respond(&config, &tools(), &request, Some(dir.path()))
+        .expect_err("a default-account resolution must not release a token");
 
     let message = error.to_string();
     assert!(
@@ -196,14 +163,8 @@ fn an_unmatched_remote_does_not_release_a_token_either() {
     let config = Config::parse(ACCOUNTS).unwrap();
     let request = Request::parse("protocol=https\n");
 
-    let error = respond(
-        &config,
-        &backend(),
-        &no_sources(),
-        &request,
-        Some(dir.path()),
-    )
-    .expect_err("an unmatched remote must not release a token");
+    let error = respond(&config, &tools(), &request, Some(dir.path()))
+        .expect_err("an unmatched remote must not release a token");
 
     assert!(
         !error.to_string().contains("personal-token"),
@@ -211,11 +172,12 @@ fn an_unmatched_remote_does_not_release_a_token_either() {
     );
 }
 
-/// A runner with no answers at all.
-///
-/// None of these accounts reference an external tool, so consulting it would be
-/// a bug -- an empty map turns that into a failing test rather than a silent
-/// success.
-fn no_sources() -> MapRunner {
-    MapRunner::new(HashMap::new())
+/// Forgejo checks the username against the token's owner; GitHub ignores it.
+#[test]
+fn the_username_is_the_accounts_login_not_its_gitwho_name() {
+    let config = Config::parse(ACCOUNTS).unwrap();
+    let request = Request::parse("protocol=https\nhost=github.com\npath=WorkOrg/thing.git\n");
+    let credential = respond(&config, &tools(), &request, None).unwrap();
+    assert_eq!(credential.username, "work-login");
+    assert_eq!(credential.password, "work-token");
 }

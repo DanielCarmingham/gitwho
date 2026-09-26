@@ -1,62 +1,16 @@
-//! Reading a value from a tool that already holds it.
+//! Reading an account's token from the CLI that already holds it.
 //!
-//! The alternative -- copying the token into gitwho's store -- creates a second
-//! copy that goes stale the moment the original is rotated. A stale credential
-//! is present, decryptable and wrong, which is exactly the failure R8 exists to
-//! refuse. A reference cannot drift, because there is only ever one value.
+//! There is no second copy: gh and tea keep the token, and gitwho asks for it
+//! per invocation. A copy goes stale the moment the original is rotated, and a
+//! stale credential is present, plausible and wrong -- the failure R8 refuses.
 //!
-//! This costs a process spawn. Measured against gh 2.97.0 on macOS,
-//! `gh auth token` takes ~60 ms against ~10 ms for a store read -- so it is
-//! declared per variable rather than switched on globally, and R15's budget
-//! still holds for everyone who does not opt in.
+//! Costs a process spawn or two: `gh auth token` ~60 ms (gh 2.97.0);
+//! `tea login ls -o json` 14 ms and `tea login helper get` 17 ms median
+//! (tea 0.15.1, fake plaintext logins).
 //!
-//! Nothing here ever logs the value it fetched. Diagnostics quote stderr, never
-//! stdout, because stdout is the secret.
+//! Nothing here ever logs a token. Diagnostics quote stderr, never stdout.
 
-use crate::config::{Account, SourcedVar};
 use crate::provider::Provider;
-use crate::secrets::Backend;
-
-/// What a source refused to do, always naming the account and variable so the
-/// message says which declaration to go and look at.
-#[derive(Debug, thiserror::Error)]
-pub enum SourceError {
-    #[error("{account}/{var} names source {from:?}, which gitwho does not know")]
-    UnknownSource {
-        account: String,
-        var: String,
-        from: String,
-    },
-    #[error("{account}/{var} is read from {program}, which is not installed")]
-    NotInstalled {
-        account: String,
-        var: String,
-        program: String,
-    },
-    #[error(
-        "{account}/{var} is read from {program}, which has no credentials for {who}: {detail}"
-    )]
-    NoCredentials {
-        account: String,
-        var: String,
-        program: String,
-        who: String,
-        detail: String,
-    },
-    #[error("{account}/{var} is read from {program}, which returned an empty value")]
-    Empty {
-        account: String,
-        var: String,
-        program: String,
-    },
-    #[error("{account}/{var} is read from {program}, which failed: {detail}")]
-    Failed {
-        account: String,
-        var: String,
-        program: String,
-        detail: String,
-    },
-}
 
 /// What a command produced.
 ///
@@ -103,6 +57,10 @@ pub struct ProcessRunner {
     /// Directories to skip when resolving a program name, because gitwho put
     /// wrappers in them.
     shim_dirs: Vec<std::path::PathBuf>,
+    /// Variables to remove from the child's environment before spawning, so
+    /// an ambient credential can never stand in for the login gitwho asked
+    /// for (R8).
+    clearing: Vec<String>,
 }
 
 impl ProcessRunner {
@@ -113,13 +71,23 @@ impl ProcessRunner {
     pub fn unshimmed() -> Self {
         Self {
             shim_dirs: Vec::new(),
+            clearing: always_cleared_owned(),
         }
     }
 
     /// A runner that refuses to find a program inside one of gitwho's own shim
     /// directories.
     pub fn skipping(shim_dirs: Vec<std::path::PathBuf>) -> Self {
-        Self { shim_dirs }
+        Self {
+            shim_dirs,
+            clearing: always_cleared_owned(),
+        }
+    }
+
+    /// Replace the set of variables cleared from the child's environment.
+    pub fn clearing(mut self, names: &[&str]) -> Self {
+        self.clearing = names.iter().map(|name| name.to_string()).collect();
+        self
     }
 
     fn resolve(&self, program: &str) -> Option<std::path::PathBuf> {
@@ -155,6 +123,13 @@ impl ProcessRunner {
         }
         None
     }
+}
+
+fn always_cleared_owned() -> Vec<String> {
+    crate::provider::always_cleared()
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 #[cfg(unix)]
@@ -203,6 +178,9 @@ impl ProcessRunner {
         };
 
         let mut command = std::process::Command::new(&resolved);
+        for name in &self.clearing {
+            command.env_remove(name);
+        }
         command
             .args(args)
             .stdin(if input.is_some() {
@@ -324,146 +302,6 @@ impl Runner for MapRunner {
         input: &str,
     ) -> std::io::Result<Option<Captured>> {
         self.answer(program, args, Some(input))
-    }
-}
-
-/// Fetch the value `sourced` points at.
-///
-/// Never falls back. A declared source that cannot answer is an error, because
-/// the alternative -- quietly reaching for the store, or for whatever is in the
-/// environment -- produces a working-but-wrong credential (R8).
-pub fn fetch(
-    runner: &dyn Runner,
-    account: &str,
-    sourced: &SourcedVar,
-) -> Result<String, SourceError> {
-    match sourced.from.as_str() {
-        "gh" => fetch_gh(runner, account, sourced),
-        other => Err(SourceError::UnknownSource {
-            account: account.to_string(),
-            var: sourced.var.clone(),
-            from: other.to_string(),
-        }),
-    }
-}
-
-/// The tools this build knows how to read from, for messages and for `doctor`.
-pub const KNOWN_SOURCES: &[&str] = &["gh"];
-
-/// The value for `var`, from wherever this account says it lives.
-///
-/// The one place that decision is made, so `exec` and the credential helper
-/// cannot drift apart about it -- which matters because `gitCredential` names a
-/// variable, so a referenced token has to serve as git's password and not only
-/// as an environment variable.
-///
-/// `Ok(None)` means the store holds nothing, preserving [`Backend::get`]'s
-/// contract that absence is distinguishable from breakage. A *sourced* variable
-/// never returns `None`: a declared source that cannot answer is a fault, and
-/// reporting it as merely absent would invite the caller to carry on without it.
-pub fn value_for(
-    backend: &dyn Backend,
-    runner: &dyn Runner,
-    account: &Account,
-    var: &str,
-) -> Result<Option<String>, ValueError> {
-    match account.source_for(var) {
-        Some(sourced) => Ok(Some(fetch(runner, &account.name, sourced)?)),
-        None => Ok(backend.get(&account.name, var)?),
-    }
-}
-
-/// Either half of [`value_for`] failing.
-///
-/// Deliberately not collapsed into one message: "the store is broken" and "gh
-/// does not know that account" call for entirely different fixes.
-#[derive(Debug, thiserror::Error)]
-pub enum ValueError {
-    #[error(transparent)]
-    Source(#[from] SourceError),
-    #[error(transparent)]
-    Store(#[from] crate::secrets::SecretError),
-}
-
-/// `gh auth token`, for one specific account.
-///
-/// `--user` is the whole reason this is safe: it reads the named account
-/// without `gh auth switch`, so there is no process-wide "active account" to
-/// mutate (R9). It also wins over an ambient `GH_TOKEN`, verified against gh
-/// 2.97.0 -- so a token already exported into the shell cannot silently answer
-/// for a different account.
-fn fetch_gh(
-    runner: &dyn Runner,
-    account: &str,
-    sourced: &SourcedVar,
-) -> Result<String, SourceError> {
-    let mut args = vec!["auth", "token"];
-
-    // Omitted rather than defaulted to github.com: gh resolves its own default
-    // host, which on an enterprise machine is not github.com, and second-
-    // guessing that would break the case the field exists for.
-    if let Some(host) = &sourced.host {
-        args.push("--hostname");
-        args.push(host);
-    }
-    if let Some(user) = &sourced.user {
-        args.push("--user");
-        args.push(user);
-    }
-
-    let captured = runner
-        .run("gh", &args)
-        .map_err(|e| SourceError::Failed {
-            account: account.to_string(),
-            var: sourced.var.clone(),
-            program: "gh".to_string(),
-            detail: e.to_string(),
-        })?
-        .ok_or_else(|| SourceError::NotInstalled {
-            account: account.to_string(),
-            var: sourced.var.clone(),
-            program: "gh".to_string(),
-        })?;
-
-    if !captured.success {
-        // gh says "no oauth token found for github.com account X" here, which
-        // is more useful than anything this could synthesise -- so it is passed
-        // through rather than replaced.
-        return Err(SourceError::NoCredentials {
-            account: account.to_string(),
-            var: sourced.var.clone(),
-            program: "gh".to_string(),
-            who: describe_who(sourced),
-            detail: captured.stderr.trim().to_string(),
-        });
-    }
-
-    // Trimmed for the same reason stored values are: every ordinary way of
-    // producing one appends a newline, and a token sent with trailing
-    // whitespace is rejected by the server with an error that mentions nothing
-    // about whitespace.
-    let value = captured.stdout.trim();
-    if value.is_empty() {
-        return Err(SourceError::Empty {
-            account: account.to_string(),
-            var: sourced.var.clone(),
-            program: "gh".to_string(),
-        });
-    }
-
-    Ok(value.to_string())
-}
-
-/// How to name the account that was asked for, in a message.
-fn describe_who(sourced: &SourcedVar) -> String {
-    match (&sourced.user, &sourced.host) {
-        (Some(user), Some(host)) => format!("{user} on {host}"),
-        (Some(user), None) => user.clone(),
-        (None, Some(host)) => format!("its active account on {host}"),
-        // Worth spelling out: no user means gitwho asked for whatever the tool
-        // considers active, which is only ever right by luck on a machine with
-        // more than one login.
-        (None, None) => "its active account".to_string(),
     }
 }
 
