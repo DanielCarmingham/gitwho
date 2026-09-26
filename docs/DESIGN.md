@@ -171,9 +171,11 @@ silent failure.
   whatever is stored in its own config; `GITEA_HOST` is read by nothing in
   `tea` and is ignored without a word. `tea login helper get` returns the
   *first* login for a host regardless of which user was asked for. `tea login
-  ls -o json` never prints a token, for any login. `tea login ls -o json`
-  median 14 ms, `tea login helper get` median 17 ms, both against plaintext
-  fake logins.
+  ls -o json` never prints a token, for any login. Against the author's real
+  login (2026-09-26, 15 runs, token discarded) `tea login ls -o json` takes a
+  median 14 ms and `tea login helper get` 31 ms -- the helper decrypts
+  `credentials.json.enc` through the keychain, which plaintext fake logins
+  (17 ms) skip.
 
 Transport is a property of a **remote**, not of an account: git picks it per
 remote, and a credential helper is only ever consulted for https. An account
@@ -399,9 +401,9 @@ throughout the source.
   matching remotes — is held to single-digit-to-low-double-digit milliseconds.
   There are no stored values to read any more. The real cost is the token
   fetch on top of that, paid on every https git operation and every `exec`:
-  one `gh auth token` spawn, about 60 ms (gh 2.97.0), or two tea spawns,
-  `tea login ls -o json` and `tea login helper get`, at 14 ms and 17 ms median
-  (tea 0.15.1, plaintext fake logins).
+  one `gh auth token` spawn, 68 ms median (gh 2.101.0), or two tea spawns,
+  `tea login ls -o json` and `tea login helper get`, 14 ms and 31 ms median
+  (tea 0.15.1, real keychain-backed login). Measured 2026-09-26, 15 runs each.
 
 ---
 

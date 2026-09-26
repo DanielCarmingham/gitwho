@@ -4,9 +4,9 @@
 //! per invocation. A copy goes stale the moment the original is rotated, and a
 //! stale credential is present, plausible and wrong -- the failure R8 refuses.
 //!
-//! Costs a process spawn or two: `gh auth token` ~60 ms (gh 2.97.0);
-//! `tea login ls -o json` 14 ms and `tea login helper get` 17 ms median
-//! (tea 0.15.1, fake plaintext logins).
+//! Costs a process spawn or two: `gh auth token` 68 ms median (gh 2.101.0);
+//! `tea login ls -o json` 14 ms and `tea login helper get` 31 ms median
+//! (tea 0.15.1, real keychain-backed login; measured 2026-09-26).
 //!
 //! Nothing here ever logs a token. Diagnostics quote stderr, never stdout.
 
