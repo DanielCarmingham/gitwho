@@ -18,6 +18,8 @@ rust-version = "1.88"
 # the build rather than just the docs.
 exclude = [
     "docs/*.md",
+    # Design specs sit a level deeper, where the pattern above does not reach.
+    "docs/superpowers/",
     "CLAUDE.md",
     ".github/",
     ".claude/",
