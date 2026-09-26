@@ -164,6 +164,27 @@ fn ssh_is_the_default_only_for_an_account_with_a_key() {
     );
 }
 
+#[test]
+fn a_remote_for_a_second_account_names_the_later_declared_as_deciding() {
+    use gitwho::publish::deciding_account;
+    let config = config_claiming(Path::new("/nonexistent"));
+    let origin = vec![(
+        "origin".to_string(),
+        "https://github.com/personal/widget.git".to_string(),
+    )];
+    let selfhosted = config.account("SelfHosted").unwrap();
+    let personal = config.account("Personal").unwrap();
+
+    assert_eq!(
+        deciding_account(&config, &origin, selfhosted).map(|a| a.name.as_str()),
+        Some("SelfHosted")
+    );
+    assert!(
+        deciding_account(&config, &origin, personal).is_none(),
+        "one account on both remotes decides nothing"
+    );
+}
+
 // --- end to end -------------------------------------------------------------
 
 /// A config dir, fake gh/tea, a local repository with one commit, and a bare
@@ -350,6 +371,7 @@ fn a_repository_that_already_has_an_origin_is_left_alone() {
 
     assert!(!output.status.success(), "{combined}");
     assert!(combined.contains("origin"), "{combined}");
+    assert!(combined.contains("--remote"), "{combined}");
     assert_eq!(fixture.fakes.api_args("gh"), None);
 }
 
@@ -407,5 +429,163 @@ fn a_gitea_account_publishes_through_tea_over_ssh() {
         gitwho::git::origin_url(fixture.repo.path()).as_deref(),
         Some(fixture.server.path().display().to_string().as_str()),
         "origin should be the ssh_url for an account with an sshKey"
+    );
+}
+
+// --- a second remote ---------------------------------------------------------
+
+fn git_config(dir: &Path, key: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["config", "--get", key])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn tea_server_answers(fixture: &Fixture) {
+    fixture
+        .fakes
+        .tea_login("sh", "https://git.example.net", "you", "gitea-token");
+    fixture.fakes.api_reply(
+        "tea",
+        &serde_json::json!({
+            "clone_url": fixture.server.path().display().to_string(),
+            "ssh_url": "git@ssh.git.example.net:you/widget.git",
+            "html_url": "https://git.example.net/you/widget",
+        })
+        .to_string(),
+    );
+}
+
+/// A mirror of history already published as another account: the commits
+/// rightly carry origin's author, the branch keeps tracking origin, and the
+/// repo now has two accounts' remotes, so it says which one decides identity.
+#[test]
+fn a_second_remote_mirrors_existing_history_to_another_account() {
+    let fixture = Fixture::new("me@example.com");
+    git(
+        fixture.repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/personal/widget.git",
+        ],
+    );
+    tea_server_answers(&fixture);
+
+    let output = fixture.publish(&[
+        "--account",
+        "SelfHosted",
+        "--remote",
+        "mirror",
+        "--name",
+        "widget",
+    ]);
+    let combined = out(&output);
+
+    assert!(output.status.success(), "{combined}");
+    assert!(combined.contains("author check"), "{combined}");
+    assert!(combined.contains("SelfHosted decides"), "{combined}");
+    assert_eq!(fixture.fakes.api_saw_token("tea"), Some(true));
+
+    // https by default, although SelfHosted has an sshKey: with two accounts
+    // here the ssh key follows whichever decides identity, not this remote.
+    assert_eq!(
+        git_config(fixture.repo.path(), "remote.mirror.url").as_deref(),
+        Some(fixture.server.path().display().to_string().as_str())
+    );
+    assert_eq!(
+        git_config(fixture.repo.path(), "remote.origin.url").as_deref(),
+        Some("https://github.com/personal/widget.git")
+    );
+    assert_ne!(
+        git_config(fixture.repo.path(), "branch.main.remote").as_deref(),
+        Some("mirror"),
+        "the branch must keep tracking origin"
+    );
+    let pushed = Command::new("git")
+        .args(["rev-parse", "--verify", "refs/heads/main"])
+        .current_dir(fixture.server.path())
+        .output()
+        .unwrap();
+    assert!(pushed.status.success(), "main did not reach the mirror");
+}
+
+/// With a remote already there, the directory resolves to origin's account,
+/// so the one to publish as has to be said.
+#[test]
+fn a_second_remote_requires_naming_the_account() {
+    let fixture = Fixture::new("me@example.com");
+    git(
+        fixture.repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/personal/widget.git",
+        ],
+    );
+    tea_server_answers(&fixture);
+
+    let output = fixture.publish(&["--remote", "mirror"]);
+    let combined = out(&output);
+
+    assert!(!output.status.success(), "{combined}");
+    assert!(combined.contains("--account"), "{combined}");
+    assert_eq!(fixture.fakes.api_args("tea"), None);
+    assert_eq!(fixture.fakes.api_args("gh"), None);
+}
+
+#[test]
+fn a_remote_name_already_in_use_is_refused() {
+    let fixture = Fixture::new("me@example.com");
+    git(
+        fixture.repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/personal/widget.git",
+        ],
+    );
+    tea_server_answers(&fixture);
+
+    let output = fixture.publish(&["--account", "SelfHosted", "--remote", "origin"]);
+    let combined = out(&output);
+
+    assert!(!output.status.success(), "{combined}");
+    assert!(combined.contains("already"), "{combined}");
+    assert_eq!(fixture.fakes.api_args("tea"), None);
+}
+
+/// With no remote yet, --remote only renames the first home: the author check
+/// still applies and the branch tracks it.
+#[test]
+fn a_first_remote_can_be_given_another_name() {
+    let fixture = Fixture::new("me@example.com");
+    fixture.server_answers();
+
+    let output = fixture.publish(&[
+        "--account",
+        "Personal",
+        "--remote",
+        "github",
+        "--name",
+        "widget",
+    ]);
+    let combined = out(&output);
+
+    assert!(output.status.success(), "{combined}");
+    assert!(!combined.contains("author check"), "{combined}");
+    assert_eq!(
+        git_config(fixture.repo.path(), "branch.main.remote").as_deref(),
+        Some("github")
     );
 }

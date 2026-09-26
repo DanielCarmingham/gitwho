@@ -120,3 +120,22 @@ pub fn transport(account: &Account, requested: Option<Transport>) -> Transport {
         Transport::Https
     })
 }
+
+/// The account whose identity rule wins once `publishing` joins the accounts
+/// already claiming `existing` remotes, or `None` if only one account is
+/// involved. The later declaration in `accounts.toml` wins, because `sync`
+/// writes the rules in declaration order and git's last include wins.
+pub fn deciding_account<'a>(
+    config: &'a Config,
+    existing: &[(String, String)],
+    publishing: &Account,
+) -> Option<&'a Account> {
+    let claims = resolve::claimants(config, existing);
+    let involved = |a: &Account| {
+        a.name == publishing.name || claims.claimed.iter().any(|(_, c)| c.name == a.name)
+    };
+    let count = config.accounts.iter().filter(|a| involved(a)).count();
+    (count > 1)
+        .then(|| config.accounts.iter().rev().find(|a| involved(a)))
+        .flatten()
+}

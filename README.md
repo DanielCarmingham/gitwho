@@ -147,7 +147,19 @@ gitwho publish --account SelfHosted              # Gitea/Forgejo, via tea
   organisation; it is private unless `--public`.
 
 If the push fails after the repository was created, gitwho leaves it in place
-and prints the command to finish. Once `origin` exists, nothing needs naming
+and prints the command to finish.
+
+To publish a copy of a repository that already has a remote — a mirror on
+another account — add `--remote <name>`:
+
+```sh
+gitwho publish --account SelfHosted --remote mirror
+```
+
+`--account` is required then, the author check is skipped (the history is
+already published as origin's account), the branch keeps tracking `origin`,
+and the remote uses https unless you pass `--ssh`: with two accounts in one
+repository, the ssh key follows whichever account decides identity. Once `origin` exists, nothing needs naming
 again — every later `gh`, `tea`, push and commit resolves from it.
 
 ## Remotes from two of your accounts
@@ -162,7 +174,8 @@ can carry only one identity. gitwho uses the account **declared later in
 `accounts.toml`**. To change which one decides, move its `[[accounts]]` block
 below the other and run `gitwho sync --write`; the order applies to every
 repository those accounts share. `gitwho whoami` in such a repository names
-the account that decides.
+the account that decides, and `gitwho publish --remote` says so when it
+creates one.
 
 ## Commands
 
@@ -186,7 +199,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 238 tests, clippy clean.
+no longer exports a token per directory. 243 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

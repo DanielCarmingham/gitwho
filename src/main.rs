@@ -38,7 +38,11 @@ Examples:
     cd ~/src/selfhosted/widget && gitwho publish
 
   If it stops because a commit has the wrong author, it prints the command
-  that fixes it; nothing has been created at that point.";
+  that fixes it; nothing has been created at that point.
+
+  Publish a copy of a repository that already has origin to another account,
+  as a second remote (the branch keeps tracking origin):
+    gitwho publish --account SelfHosted --remote mirror";
 
 #[derive(Parser)]
 #[command(
@@ -103,6 +107,12 @@ enum Command {
         /// Set `origin` to the https URL. The default otherwise.
         #[arg(long)]
         https: bool,
+        /// Add the new repository as this remote instead of `origin`. With a
+        /// remote already present this publishes a copy of that history:
+        /// --account is required, the author check is skipped, the branch
+        /// keeps its upstream, and https is the default.
+        #[arg(long, value_name = "NAME")]
+        remote: Option<String>,
     },
 
     /// Set up everything on a machine that has never run gitwho.
@@ -273,6 +283,7 @@ fn main() -> ExitCode {
             public,
             ssh,
             https,
+            remote,
         } => {
             let requested = match (ssh, https) {
                 (true, _) => Some(Transport::Ssh),
@@ -285,6 +296,7 @@ fn main() -> ExitCode {
                 owner.as_deref(),
                 public,
                 requested,
+                remote.as_deref(),
             ) {
                 Ok(code) => code,
                 Err(message) => {
@@ -843,6 +855,7 @@ fn publish(
     owner: Option<&str>,
     public: bool,
     requested: Option<Transport>,
+    remote: Option<&str>,
 ) -> Result<ExitCode, String> {
     use gitwho::publish::{choose_account, create_args, foreign_authors, parse_created, transport};
 
@@ -854,22 +867,45 @@ fn publish(
     }
     let branch = git_output(&cwd, &["symbolic-ref", "--short", "-q", "HEAD"])
         .ok_or("HEAD is detached; check out the branch to publish")?;
-    if let Some(url) = gitwho::git::origin_url(&cwd) {
-        return Err(format!(
-            "this repository already has an origin ({url}); publish is for one with no remote yet"
-        ));
+    let remote_name = remote.unwrap_or("origin");
+    let existing = gitwho::git::remotes(&cwd);
+    if let Some((_, url)) = existing.iter().find(|(name, _)| name == remote_name) {
+        return Err(match remote {
+            None => format!(
+                "this repository already has an origin ({url}); to publish a copy to \
+                 another account as a second remote, add --remote <name> --account <account>"
+            ),
+            Some(_) => format!(
+                "this repository already has a remote named {remote_name} ({url}); choose another name"
+            ),
+        });
     }
+    // History that already has a remote is published elsewhere; this makes a copy.
+    let copy = !existing.is_empty();
 
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
-    let account = choose_account(&config, account_name, &cwd).map_err(|e| e.to_string())?;
+    let account = if copy {
+        let named = account_name.ok_or(
+            "this repository already has a remote, so it resolves to that remote's account; \
+             name the account to publish the copy as with --account",
+        )?;
+        config
+            .account(named)
+            .ok_or_else(|| format!("no account named {named:?}"))?
+    } else {
+        choose_account(&config, account_name, &cwd).map_err(|e| e.to_string())?
+    };
 
+    if copy {
+        println!("author check skipped: this history is already published through another remote");
+    }
     let authors: Vec<String> = git_output(&cwd, &["log", "--format=%ae"])
         .unwrap_or_default()
         .lines()
         .map(String::from)
         .collect();
     let foreign = foreign_authors(&account.email, &authors);
-    if !foreign.is_empty() {
+    if !copy && !foreign.is_empty() {
         let author = match account
             .git_name
             .as_deref()
@@ -938,22 +974,44 @@ fn publish(
     let created = parse_created(&stdout).map_err(|e| e.to_string())?;
     println!("created   {}", created.html_url);
 
-    let remote = created.remote(transport(account, requested)).to_string();
-    if !git_succeeds(&cwd, &["remote", "add", "origin", &remote], false) {
+    // A copy defaults to https: with two accounts' remotes in one repo, the ssh
+    // key follows whichever account decides identity, not this remote's.
+    let chosen = match (copy, requested) {
+        (true, None) => Transport::Https,
+        _ => transport(account, requested),
+    };
+    let url = created.remote(chosen).to_string();
+    let push: Vec<&str> = if copy {
+        vec!["push", remote_name, &branch]
+    } else {
+        vec!["push", "-u", remote_name, &branch]
+    };
+    if !git_succeeds(&cwd, &["remote", "add", remote_name, &url], false) {
         return Err(format!(
-            "{} exists, but setting origin failed; finish with:\n  git remote add origin {remote} && git push -u origin {branch}",
-            created.html_url
+            "{} exists, but adding remote {remote_name} failed; finish with:\n  git remote add {remote_name} {url} && git {}",
+            created.html_url,
+            push.join(" ")
         ));
     }
-    println!("origin    {remote}");
+    println!("{remote_name:<9} {url}");
 
-    if !git_succeeds(&cwd, &["push", "-u", "origin", &branch], true) {
+    if !git_succeeds(&cwd, &push, true) {
         return Err(format!(
-            "{} exists and origin is set, but the push failed; retry with:\n  git push -u origin {branch}",
-            created.html_url
+            "{} exists and {remote_name} is set, but the push failed; retry with:\n  git {}",
+            created.html_url,
+            push.join(" ")
         ));
     }
     println!("pushed    {branch}");
+
+    if let Some(winner) = gitwho::publish::deciding_account(&config, &existing, account) {
+        println!(
+            "identity  {} decides in this repository: it is declared later in accounts.toml.\n          \
+             To change that, move the other account's [[accounts]] block below it and\n          \
+             run `gitwho sync --write`.",
+            winner.name
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
