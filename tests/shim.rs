@@ -248,3 +248,40 @@ mod establishes_credentials {
         assert!(!establishes_credentials("glab", &args(&["auth", "login"])));
     }
 }
+
+mod fetches_token {
+    use gitwho::shim::fetches_token;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Exactly what `sources::token` and `discover` run through a shim.
+    #[test]
+    fn the_commands_gitwho_runs_to_read_a_token_are_recognised() {
+        let gh_token = args(&[
+            "auth",
+            "token",
+            "--hostname",
+            "github.com",
+            "--user",
+            "octocat",
+        ]);
+        assert!(fetches_token("/opt/homebrew/bin/gh", &gh_token));
+        assert!(fetches_token("gh", &args(&["auth", "status"])));
+        assert!(fetches_token("tea", &args(&["login", "ls", "-o", "json"])));
+        assert!(fetches_token("tea", &args(&["login", "helper", "get"])));
+        assert!(fetches_token(
+            "C:\\bin\\tea.exe",
+            &args(&["login", "helper", "get"])
+        ));
+    }
+
+    #[test]
+    fn anything_else_is_not() {
+        assert!(!fetches_token("gh", &args(&["pr", "list"])));
+        assert!(!fetches_token("gh", &args(&["api", "user"])));
+        assert!(!fetches_token("tea", &args(&["repos", "ls"])));
+        assert!(!fetches_token("git", &args(&["auth", "token"])));
+    }
+}

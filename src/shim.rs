@@ -48,11 +48,6 @@ impl ShimTarget {
 /// happened to run `shim install`.
 const WINDOWS_EXTENSIONS: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
 
-/// What the shim must be called to be found.
-///
-/// On Windows, `PATHEXT` resolves `gh.exe` or `gh.cmd` and never an
-/// extensionless file, so a shim written as plain `gh` would sit on `PATH`
-/// being ignored.
 /// Argument prefixes that must never run with an injected credential, per tool.
 ///
 /// These are the commands whose *purpose* is to establish a credential. Handing
@@ -85,6 +80,24 @@ const ESTABLISHES_CREDENTIALS: &[(&str, &[&[&str]])] = &[
 /// matched ignoring flags, so a global flag before the subcommand cannot hide
 /// it.
 pub fn establishes_credentials(program: &str, args: &[String]) -> bool {
+    matches_any(ESTABLISHES_CREDENTIALS, program, args)
+}
+
+/// The commands gitwho itself runs through a CLI to read a token or list its
+/// logins: `sources::token` and `discover`. Nothing else is ever run with
+/// `sources::FETCHING_TOKEN` set.
+const FETCHES_TOKEN: &[(&str, &[&[&str]])] = &[
+    ("gh", &[&["auth", "token"], &["auth", "status"]]),
+    ("tea", &[&["login", "ls"], &["login", "helper"]]),
+];
+
+/// Whether running `program` with `args` is one of gitwho's own token reads,
+/// matched the same way as [`establishes_credentials`].
+pub fn fetches_token(program: &str, args: &[String]) -> bool {
+    matches_any(FETCHES_TOKEN, program, args)
+}
+
+fn matches_any(table: &[(&str, &[&[&str]])], program: &str, args: &[String]) -> bool {
     // Both separators, deliberately: `Path` on unix does not treat a backslash
     // as one, so a Windows path would arrive here as a single long file name
     // and match nothing. Keeping this a pure function of the string is what
@@ -95,10 +108,7 @@ pub fn establishes_credentials(program: &str, args: &[String]) -> bool {
         .find_map(|ext| file.strip_suffix(ext))
         .unwrap_or(file);
 
-    let Some((_, prefixes)) = ESTABLISHES_CREDENTIALS
-        .iter()
-        .find(|(tool, _)| *tool == name)
-    else {
+    let Some((_, prefixes)) = table.iter().find(|(tool, _)| *tool == name) else {
         return false;
     };
 
@@ -113,6 +123,11 @@ pub fn establishes_credentials(program: &str, args: &[String]) -> bool {
         .any(|prefix| words.len() >= prefix.len() && words[..prefix.len()] == **prefix)
 }
 
+/// What the shim must be called to be found.
+///
+/// On Windows, `PATHEXT` resolves `gh.exe` or `gh.cmd` and never an
+/// extensionless file, so a shim written as plain `gh` would sit on `PATH`
+/// being ignored.
 pub fn shim_file_name(name: &str, target: ShimTarget) -> String {
     match target {
         ShimTarget::Posix => name.to_string(),

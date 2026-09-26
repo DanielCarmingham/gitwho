@@ -267,3 +267,46 @@ fn a_login_command_runs_even_when_accounts_toml_has_a_removed_field() {
     assert!(output.status.success(), "{combined}");
     assert!(combined.contains("args: auth login"), "{combined}");
 }
+
+/// The marker only ever reaches gitwho's own token-fetch children. Seen on any
+/// other command it was exported by hand, and honouring it would run the tool
+/// as whatever login it defaults to -- a working but possibly wrong account.
+#[test]
+fn a_stray_fetch_marker_refuses_an_ordinary_command_rather_than_run_it_bare() {
+    let fixture = Fixture::new();
+
+    let output = fixture
+        .command(&["exec", "--", "gh", "pr", "list"], None)
+        .env(gitwho::sources::FETCHING_TOKEN, "1")
+        .output()
+        .unwrap();
+    let combined = out(&output);
+
+    assert!(!output.status.success(), "{combined}");
+    assert!(
+        combined.contains(gitwho::sources::FETCHING_TOKEN),
+        "{combined}"
+    );
+    assert!(
+        !combined.contains("args: pr list"),
+        "gh ran anyway:\n{combined}"
+    );
+}
+
+#[test]
+fn the_fetch_marker_still_lets_a_token_fetch_through_without_injecting_one() {
+    let fixture = Fixture::new();
+
+    let output = fixture
+        .command(
+            &["exec", "--", "gh", "auth", "status"],
+            Some("ambient-token"),
+        )
+        .env(gitwho::sources::FETCHING_TOKEN, "1")
+        .output()
+        .unwrap();
+    let combined = out(&output);
+
+    assert!(output.status.success(), "{combined}");
+    assert!(combined.contains("GH_TOKEN: unset"), "{combined}");
+}

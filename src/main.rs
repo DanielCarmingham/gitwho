@@ -719,8 +719,17 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
     let (program, args) = command.split_first().expect("clap requires a command");
 
     // Re-entered from our own token fetch through a shim we did not skip:
-    // fetching a token here would re-enter again, without end.
+    // fetching a token here would re-enter again, without end. Only those
+    // commands carry the marker, so on anything else it was exported by hand,
+    // and running bare would let the tool fall back to its default login.
     if std::env::var_os(gitwho::sources::FETCHING_TOKEN).is_some() {
+        if !gitwho::shim::fetches_token(program, args) {
+            return Err(format!(
+                "{} is set, but `{}` is not a command gitwho runs to read a token; unset it",
+                gitwho::sources::FETCHING_TOKEN,
+                command.join(" ")
+            ));
+        }
         return run_with(program, args, &plan_cleared());
     }
 
