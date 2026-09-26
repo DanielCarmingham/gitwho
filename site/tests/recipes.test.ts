@@ -14,8 +14,7 @@ import { backticksBalanced } from '../src/inline-code';
  * The example cannot answer either of the two questions that matter here: which
  * keys are required (it fills all of them in), and which section a key belongs
  * to (a flat scan of it merges `[defaults]` with `[[accounts]]`, and serde does
- * not: `deny_unknown_fields` is on `Defaults`, `Account` and `SourcedVar`
- * separately).
+ * not: `deny_unknown_fields` is on `Defaults` and `Account` separately).
  */
 const CONFIG_RS = readFileSync('../src/config.rs', 'utf8');
 const EXAMPLE = readFileSync('../docs/accounts.toml.example', 'utf8');
@@ -83,13 +82,17 @@ function fieldsOf(name: string): Field[] {
 
 const DEFAULTS = fieldsOf('Defaults');
 const ACCOUNT = fieldsOf('Account');
-const SOURCED = fieldsOf('SourcedVar');
 
 const named = (fields: Field[]) => fields.map((f) => f.key);
 const requiredOf = (fields: Field[]) => fields.filter((f) => f.required).map((f) => f.key);
 
 /** Every account in a recipe, parsed. */
-type Account = Record<string, unknown> & { name?: string };
+type Account = Record<string, unknown> & {
+  name?: string;
+  provider?: string;
+  url?: string;
+  login?: string;
+};
 interface Parsed {
   defaults?: Record<string, unknown>;
   accounts?: Account[];
@@ -97,72 +100,37 @@ interface Parsed {
 
 const parsed = (toml: string) => parse(toml) as Parsed;
 
-/** `env` entries that are tables — the `SourcedVar` form. */
-const sourcedEntries = (account: Account) =>
-  ((account.env ?? []) as unknown[]).filter(
-    (e): e is Record<string, unknown> => typeof e === 'object' && e !== null,
-  );
-
-/** `env` entries that are plain strings — `"VAR"` or `"VAR=literal"`. */
-const simpleEntries = (account: Account) =>
-  ((account.env ?? []) as unknown[]).filter((e): e is string => typeof e === 'string');
-
-/**
- * The variables this account needs a value stored for.
- *
- * A bare `"VAR"` is a name to fetch from the store. `"VAR=literal"` carries its
- * own value. A table reads its value from another tool, so there is nothing to
- * store. `gitCredential` names a variable that git will need a password from,
- * so it has to be stored too — unless one of the other forms already supplies
- * it.
- */
-function storedVariables(account: Account): Set<string> {
-  const stored = new Set<string>();
-  for (const entry of simpleEntries(account)) {
-    if (!entry.includes('=')) stored.add(entry);
-  }
-
-  const credential = account.gitCredential as string | undefined;
-  if (credential) {
-    const supplied =
-      sourcedEntries(account).some((e) => e.var === credential) ||
-      simpleEntries(account).some((e) => e.startsWith(`${credential}=`));
-    if (!supplied) stored.add(credential);
-  }
-  return stored;
-}
-
-/** `gitwho secret set <Account> <VAR>` — the only shape a recipe may list. */
-const SECRET_SET = /^gitwho secret set (\S+) (\S+)$/;
+/** A `gh auth login` or `tea login add` line, exactly as a reader would type it. */
+const GH_LOGIN = /^gh auth login --hostname (\S+)(?:\s+#.*)?$/;
+const TEA_LOGIN = /^tea login add --url (\S+)(?:\s+#.*)?$/;
 
 describe('the schema this test reads from ../src/config.rs', () => {
-  it('finds the three structs a recipe is parsed into', () => {
+  it('finds the two structs a recipe is parsed into', () => {
     expect(named(DEFAULTS).length).toBeGreaterThan(0);
     expect(named(ACCOUNT).length).toBeGreaterThan(0);
-    expect(named(SOURCED).length).toBeGreaterThan(0);
   });
 
   it('tells a required field from one with a serde default', () => {
-    // Anchors for the parser itself. `name` carries no attribute and `sshKey`
+    // Anchors for the parser itself. `login` carries no attribute and `sshKey`
     // carries `#[serde(rename = "sshKey", default)]`; if the parser stopped
     // reading attributes, these are the two that would flip.
-    expect(requiredOf(ACCOUNT)).toContain('name');
+    expect(requiredOf(ACCOUNT)).toContain('login');
     expect(requiredOf(ACCOUNT)).not.toContain('sshKey');
     expect(requiredOf(DEFAULTS)).toContain('account');
     expect(requiredOf(DEFAULTS)).not.toContain('gitName');
   });
 
   it('reads the serde rename rather than the Rust field name', () => {
-    expect(named(ACCOUNT)).toContain('gitCredential');
+    expect(named(ACCOUNT)).toContain('sshKey');
     expect(named(ACCOUNT)).toContain('match');
-    expect(named(ACCOUNT)).not.toContain('git_credential');
+    expect(named(ACCOUNT)).not.toContain('ssh_key');
     expect(named(ACCOUNT)).not.toContain('match_patterns');
   });
 
   it('confirms each struct still refuses an unknown field', () => {
     // Every "uses no key absent from the schema" check below is only load-
     // bearing because serde rejects the extra key at run time.
-    for (const name of ['Defaults', 'Account', 'SourcedVar']) {
+    for (const name of ['Defaults', 'Account']) {
       expect(structOf(name).attrs, `${name} must deny unknown fields`).toContain(
         'deny_unknown_fields',
       );
@@ -179,11 +147,6 @@ describe('the schema this test reads from ../src/config.rs', () => {
     for (const account of example.accounts ?? []) {
       for (const key of Object.keys(account)) {
         expect(named(ACCOUNT), `example [[accounts]] uses "${key}"`).toContain(key);
-      }
-      for (const entry of sourcedEntries(account)) {
-        for (const key of Object.keys(entry)) {
-          expect(named(SOURCED), `example env table uses "${key}"`).toContain(key);
-        }
       }
     }
   });
@@ -244,22 +207,6 @@ describe('RECIPES', () => {
     }
   });
 
-  it('uses no key absent from SourcedVar inside an env table', () => {
-    for (const recipe of RECIPES) {
-      for (const account of parsed(recipe.toml).accounts ?? []) {
-        for (const entry of sourcedEntries(account)) {
-          const where = `${recipe.id} account "${account.name}" env table`;
-          for (const key of Object.keys(entry)) {
-            expect(named(SOURCED), `${where} uses "${key}"`).toContain(key);
-          }
-          for (const key of requiredOf(SOURCED)) {
-            expect(Object.keys(entry), `${where} must set "${key}"`).toContain(key);
-          }
-        }
-      }
-    }
-  });
-
   it('declares a defaults account that one of its accounts defines', () => {
     for (const recipe of RECIPES) {
       const config = parsed(recipe.toml);
@@ -268,38 +215,49 @@ describe('RECIPES', () => {
     }
   });
 
-  it('lists a secret command for every variable the config needs stored', () => {
+  it('gives every gitea account a url, and no github account one', () => {
     for (const recipe of RECIPES) {
-      const listed = new Set(
-        recipe.secrets
-          .map((line) => line.match(SECRET_SET))
-          .filter((m): m is RegExpMatchArray => m !== null)
-          .map((m) => `${m[1]}/${m[2]}`),
-      );
       for (const account of parsed(recipe.toml).accounts ?? []) {
-        for (const variable of storedVariables(account)) {
-          expect(listed, `${recipe.id} needs "gitwho secret set ${account.name} ${variable}"`).toContain(
-            `${account.name}/${variable}`,
-          );
+        if (account.provider === 'gitea') {
+          expect(account.url, `${recipe.id} account "${account.name}" (gitea) needs "url"`).toBeTruthy();
+        } else if (account.provider === 'github') {
+          expect(
+            account.url,
+            `${recipe.id} account "${account.name}" (github) must not set "url"`,
+          ).toBeUndefined();
         }
       }
     }
   });
 
-  it('names an account and a variable that config actually declares in every secret command', () => {
+  it('lists one login command per account, matching its provider', () => {
     for (const recipe of RECIPES) {
       const accounts = parsed(recipe.toml).accounts ?? [];
-      for (const line of recipe.secrets) {
-        const match = line.match(SECRET_SET);
-        expect(match, `${recipe.id}: "${line}" is not a "gitwho secret set <Account> <VAR>"`).not.toBeNull();
-        const [, accountName, variable] = match!;
+      expect(recipe.logins, `${recipe.id} lists one login line per account`).toHaveLength(
+        accounts.length,
+      );
 
-        const account = accounts.find((a) => a.name === accountName);
-        expect(account, `${recipe.id} has no account named "${accountName}"`).toBeDefined();
-        expect(
-          [...storedVariables(account!)],
-          `${recipe.id}: account "${accountName}" never declares "${variable}"`,
-        ).toContain(variable);
+      for (const line of recipe.logins) {
+        const gh = line.match(GH_LOGIN);
+        const tea = line.match(TEA_LOGIN);
+        expect(gh ?? tea, `${recipe.id}: "${line}" is not a gh or tea login command`).not.toBeNull();
+      }
+
+      for (const account of accounts) {
+        if (account.provider === 'github') {
+          expect(
+            recipe.logins.some((line) => GH_LOGIN.test(line) && line.includes(`github.com`)),
+            `${recipe.id}: no "gh auth login --hostname github.com" for "${account.name}"`,
+          ).toBe(true);
+        } else if (account.provider === 'gitea') {
+          expect(
+            recipe.logins.some((line) => {
+              const match = line.match(TEA_LOGIN);
+              return match !== undefined && match !== null && match[1] === account.url;
+            }),
+            `${recipe.id}: no "tea login add --url ${account.url}" for "${account.name}"`,
+          ).toBe(true);
+        }
       }
     }
   });
@@ -320,8 +278,8 @@ describe('RECIPES', () => {
     // command a reader is meant to paste.
     for (const recipe of RECIPES) {
       expect(recipe.title, `${recipe.id} title`).not.toContain('`');
-      for (const line of recipe.secrets) {
-        expect(line, `${recipe.id} secrets`).not.toContain('`');
+      for (const line of recipe.logins) {
+        expect(line, `${recipe.id} logins`).not.toContain('`');
       }
     }
   });

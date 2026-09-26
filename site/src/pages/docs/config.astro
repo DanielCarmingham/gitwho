@@ -21,11 +21,12 @@ const source = readFileSync('../docs/accounts.toml.example', 'utf8');
       accounts gitwho resolves against.
     </p>
     <p>
-      Two fields are easy to misread. <code>gitCredential</code> and <code>env</code> name
-      environment variables — they do not hold values. The values live in an encrypted secret
-      store, populated separately with <code>gitwho secret set</code>. That split is deliberate:
-      it is what lets <code>accounts.toml</code> itself be committed to a dotfiles repo, since
-      there is nothing secret in it to leak.
+      One field is easy to misread. <code>login</code> is not the git author — that's
+      <code>gitName</code> and <code>email</code> — it is the login <code>gh</code> or
+      <code>tea</code> already holds a token under, and gitwho asks that CLI for the token on every
+      invocation rather than storing one itself. That split is deliberate: it is what lets
+      <code>accounts.toml</code> itself be committed to a dotfiles repo, since there is nothing
+      secret in it to leak.
     </p>
     <p>
       For complete worked examples across providers, see <a href="/docs/recipes/">recipes</a>.

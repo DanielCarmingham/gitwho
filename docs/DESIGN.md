@@ -27,21 +27,18 @@ when they do you commit as one person while authenticating as another.
 
 ## Terminology
 
-"Identity" carries three unrelated meanings around this project, each correct in
+"Identity" carries two unrelated meanings around this project, each correct in
 its own vocabulary. They are worth separating once.
 
 | Term | Means | Set by |
 |---|---|---|
 | **git identity** | `user.name`, `user.email` and `core.sshcommand` | the generated per-account gitconfig, included per remote URL |
-| **age identity** | the private key that decrypts the secret store, in `identity.key` | `gitwho secret init` |
-| **credential** | a token: git's https password, or what a CLI authenticates as | the store, or the tool a variable references |
+| **credential** | a token: git's https password, or what a CLI authenticates as | `gh` or `tea`, read on demand |
 
-The collision is not sloppiness. "Identity" is [age][age]'s own word for a
-private key, and git's own word for commit authorship. Nothing is renamed here
-to avoid it, because each name is right where it is used; this table exists so
-the overlap can be read rather than guessed at.
-
-[age]: https://github.com/FiloSottile/age
+The collision is not sloppiness. "Identity" is git's own word for commit
+authorship, reused here for the generated gitconfig that sets it. Nothing is
+renamed to avoid it, because the name is right where it is used; this table
+exists so the overlap can be read rather than guessed at.
 
 **The ssh key sits on the identity axis while being a credential in every
 ordinary sense.** That is forced, not chosen. `core.sshcommand` can only be
@@ -60,9 +57,10 @@ answer is:
   and no token is involved at all (R7). A wrong identity usually fails at the
   server instead of landing quietly in history.
 
-`gitCredential` and the entries in `env` name **variables**, never values (R10).
-A variable so named is not itself the credential; it is where the credential
-will be found — in the store, or in the tool the entry points at.
+An account names a **provider** and a **login**, never a value (R10): the
+provider decides which variables its tools read, and the login is which one of
+that provider's CLI logins holds the token. `accounts.toml` itself carries no
+secret, so it has nothing to leak.
 
 ---
 
@@ -189,73 +187,68 @@ credential that is present, decryptable and wrong. **A provider's CLI that
 cannot answer is an error, never a fallback** — not to another source, and not
 to another account (R8).
 
-### The secret store: two measurements that overturned the first choice
+### Why there used to be a secret store, and why there no longer is
 
-The platform keychain was the obvious store, and both reasons it is not the
-default are reproducible.
+Through 0.2, gitwho kept its own age-encrypted file and read tokens out of it.
+That store is gone as of 0.3: `gh` and `tea` already hold every token gitwho
+needs, keeping a second copy meant it could disagree with the one the CLI
+holds, and reading it on demand rather than caching it is what makes rotation
+and revocation visible on the next call instead of silently stale (R6, R8).
+
+Two of the measurements that shaped the store while it existed are worth
+keeping, because they explain why neither platform's own secret storage was
+going to beat asking the CLI directly, and are cited nowhere else:
 
 **macOS keys a Keychain ACL to the calling binary's designated requirement.**
 For an unsigned binary that is its code hash, so *every rebuild* presents as a
-new application and the read blocks on a GUI prompt — verified by writing an
+new application and a read blocks on a GUI prompt — verified by writing an
 entry with one build and reading it with the next, which hung until killed.
-The credential helper runs on every git transport operation, so this fails the
-latency requirement outright. `codesign` then blocked on a second prompt for
+Anything on the credential-helper hot path fails the latency requirement
+outright if it depends on this. `codesign` then blocked on a second prompt for
 the signing key, so "sign it with a stable identity" remains plausible but
-unverified. `examples/keychain_probe.rs` is how to confirm it.
+unverified. (Verified with a small keychain probe, since removed along with
+the store it was written to test.)
 
 **age's passphrase mode is far too slow.** scrypt is deliberately expensive:
-measured at **1.53 s per read**, against a budget in milliseconds. Switching to
-an x25519 identity removes the KDF entirely and brings a read under a
-millisecond — the test suite went from 3.05 s to 0.00 s. A regression test now
-pins reads under 100 ms so a KDF cannot creep back in.
+measured at **1.53 s per read**, against a budget in milliseconds. That is why
+the store, while it existed, used an x25519 identity rather than a passphrase.
 
-The other two platform stores are implemented and reachable, but nothing
-chooses them automatically, because they do not draw the same boundary:
-
-| Store | Keeps a secret from |
-|---|---|
-| macOS Keychain | *other applications*, via a per-application ACL |
-| Windows Credential Manager (DPAPI) | other users |
-| Linux Secret Service | other users |
-
-Only the first is stronger than an age file that is already `0600` and owned by
-you. On the other two, flipping the default would buy nothing measurable.
+Neither finding is about `gh` or `tea`'s own storage: `gh` keeps its token in
+the macOS keychain under its own signed identity, and `tea` keeps its tokens in
+`credentials.json.enc` with the key in the keychain — both were built and
+signed by someone else, so the ACL and signing problems above are theirs to
+have already solved, not gitwho's.
 
 **Resolving `gh` normally re-enters gitwho.** The shim directory leads `PATH`
 and its `gh` runs `gitwho exec -- /real/gh`, so asking `gh` for a token calls
-itself. The runner skips its own shim directories. The symptom looked like a
-config parse error rather than a loop.
+itself. The runner skips its own shim directories. This still matters with the
+store gone, because it is exactly how `exec` gets a GitHub token today.
 
 ---
 
 ## What this protects, and what it does not
 
-Worth being blunt, because the encryption invites an assumption it does not
-earn.
+Worth being blunt, because "gitwho decides who gets logged in" invites an
+assumption it does not earn.
 
-The identity key sits on disk beside the encrypted secrets, both owned by you.
-Anything running as you can read both and decrypt. So the age file defends the
-secrets **at rest** — a backup, a sync folder, an accidental commit — and not
-against a local process.
-
-And the bar is lower than even that suggests, because local code need not go
-near the key or the ciphertext. It can ask:
+gitwho holds no secret of its own. A token lives in `gh`'s keychain entry, or
+in `tea`'s `credentials.json.enc` with its key in the keychain — both owned by
+you, both readable by anything running as you. Anything running as your user
+can ask for the same token gitwho would get, exactly the way gitwho asks:
 
 ```sh
-printf 'protocol=https\nhost=github.com\npath=Org/repo.git\n' | gitwho credential get
+gh auth token --hostname github.com --user <login>
 ```
 
-which returns `password=<token>`. The credential helper is a decryption oracle
-for its own store by construction — being one is the whole job. Extracting a
-token this way is no harder than reading `GH_TOKEN` from a `.bashrc` or running
-`gh auth token`, so **against code running as your user this design is not an
-improvement on the thing it replaced, and must not be described as one.**
+That is no harder than what gitwho itself does to answer a credential request,
+so **against code running as your user, gitwho is not an improvement on asking
+`gh` or `tea` directly, and must not be described as one.**
 
-The cross-project exposure this tool exists to remove comes from somewhere
-else: **secrets are fetched on demand by the one process that needs them,
-instead of sitting in the ambient environment where every unrelated process
-inherits them.** That property holds for either backend, and it is the one that
-matters day to day.
+What gitwho changes is exposure over time: a token is fetched by the one
+process that needs it, for one invocation, rather than sitting in the ambient
+environment where every process you launch for the whole session inherits it.
+That is the property that matters day to day, and it holds whether the token
+came from `gh`, from `tea`, or — through 0.2 — from gitwho's own store.
 
 ---
 
@@ -284,7 +277,7 @@ Four entry points into one resolver. Nothing shares mutable global state.
        │              │
        └──────┬───────┘
          ┌────▼─────────────────┐
-         │  secrets backend     │  trait: AgeFile | Keychain | Env
+         │   gh / tea (CLI)     │  the token source, asked on demand
          └──────────────────────┘
 ```
 
@@ -385,9 +378,9 @@ throughout the source.
   working-but-incorrect account. Wrong-and-quiet is worse than broken-and-loud.
 - **R9 — No global mutable state.** Credential selection is per-process or
   per-invocation. No `gh auth switch`-style process-wide active account.
-- **R10 — Secrets stay out of version control.** Config that *names* variables
-  is committable; values are not. `accounts.toml` is designed to live in a
-  dotfiles repo.
+- **R10 — Secrets never enter this repo, and gitwho stores none.**
+  `accounts.toml` names logins, the CLIs hold tokens. `accounts.toml` is
+  designed to live in a dotfiles repo.
 - **R11 — No token leakage across accounts.** Entering a Gitea repo does not
   hand a GitHub token to Gitea tooling, or the reverse. `exec` scrubs every
   managed variable before injecting the resolved account's.
@@ -402,7 +395,11 @@ throughout the source.
   dotfiles repo plus re-entered tokens. Anything that cannot be committed is
   documented as a manual step rather than discovered.
 - **R15 — Cheap.** Resolution runs on every CLI invocation and every git
-  transport operation. The budget is single-digit milliseconds.
+  transport operation. The budget is single-digit-to-low-double-digit
+  milliseconds, measured against the token sources themselves: `gh auth token`
+  costs one process spawn, about 60 ms; `tea login ls -o json` plus
+  `tea login helper get` measured 14 ms and 17 ms median respectively, against
+  plaintext fake logins.
 
 ---
 

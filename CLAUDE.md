@@ -12,8 +12,8 @@ each one rests on. [README.md](README.md) is the short version;
 ## Status
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
-resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
-and MCP wrapping all route real traffic. 231 tests, clippy clean.
+resolver, credential helper, CLI-sourced tokens, `exec` + shims, `doctor`,
+`sync` and MCP wrapping all route real traffic. 204 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
 suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
@@ -48,16 +48,16 @@ still *builds* elsewhere.
   produces a *working but incorrect* account is a bug, not a convenience. This
   is why `Resolved` carries a `reason` and why `Unmatched` is distinct from
   `Default`.
-- **Secrets never enter this repo** (R10). Config that *names* a variable is
-  tracked; a value never is. It lives in the store, or in the tool a variable
-  references — never in `accounts.toml`. Never echo a token value —
-  fingerprints or prefixes only, including in test output and error messages.
+- **Secrets never enter this repo, and gitwho stores none** (R10).
+  `accounts.toml` names a provider and a login; the CLIs hold the tokens.
+  Never echo a token value — fingerprints or prefixes only, including in test
+  output and error messages.
 - **No global mutable credential state** (R9). No `gh auth switch`-style
   process-wide active account. Per-process / per-invocation only.
 - **Resolution is on the hot path** (R15). It runs on every CLI invocation and
   every git transport operation; budget is single-digit-to-low-double-digit
-  milliseconds. A regression test pins secret reads under 100 ms so a KDF
-  cannot creep back in.
+  milliseconds, measured against `gh`'s and `tea`'s own costs (`gh` ~60 ms one
+  process spawn; `tea`'s pair ~14 ms + ~17 ms median).
 - **Nothing personal in the repo.** Fixtures and examples use `example.com`,
   `acme-*` and placeholder account names. Real accounts, orgs, emails and
   hostnames belong in `~/.config/gitwho/accounts.toml`, never here.
@@ -205,7 +205,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 231 pass, 1 ignored
+cargo test                              # 204 pass, 0 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

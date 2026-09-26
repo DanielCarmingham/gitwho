@@ -22,14 +22,13 @@ import PlatformTable from '../components/PlatformTable.astro';
  * A `doctor` run over the config the quick start walks through.
  *
  * The shape is the tool's own: `<tag> [<check>] <message>`, with the checks it
- * actually emits — permissions, backend, secrets, ambient. `git` and `config`
- * findings are absent because those checks stay silent when nothing is wrong,
- * which is why a clean run is short.
+ * actually emits — permissions, tokens, ambient. `git` and `config` findings
+ * are absent because those checks stay silent when nothing is wrong, which is
+ * why a clean run is short.
  */
 const doctor = `ok   [permissions] /Users/you/.config/gitwho and its files are owner-only
-ok   [backend] secrets are in the age file at /Users/you/.config/gitwho/secrets.age, chosen by default
-ok   [secrets] Personal/GH_TOKEN 4c1f9ab30e77
-ok   [secrets] Work/GH_TOKEN 9e02b7d5164a
+ok   [tokens] Personal: gh login your-personal-username 4c1f9ab30e77
+ok   [tokens] Work: gh login your-work-username 9e02b7d5164a
 warn [ambient] GH_TOKEN is set in the environment; every process launched from this shell inherits it`;
 
 const READING = [
@@ -56,7 +55,7 @@ const READING = [
   {
     href: '/docs/security/',
     label: 'docs/security',
-    gloss: 'what the encryption defends against, and what it plainly does not',
+    gloss: 'what gitwho protects against, and what it plainly does not',
   },
   {
     href: 'https://github.com/DanielCarmingham/gitwho',
@@ -143,9 +142,9 @@ const READING = [
     <div class="prose">
       <h2>One process, one invocation</h2>
       <p>
-        The property that matters is not the encryption. It is that a token is fetched by the one
-        process that needs it, at the moment it needs it, instead of sitting in your environment
-        where everything you launch inherits it.
+        gitwho stores no secret of its own — the property that matters is that a token is fetched by
+        the one process that needs it, at the moment it needs it, from whichever CLI already holds
+        it, instead of sitting in your environment where everything you launch inherits it.
       </p>
     </div>
     <div class="hero__figure">

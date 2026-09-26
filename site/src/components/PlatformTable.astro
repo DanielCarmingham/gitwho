@@ -28,8 +28,8 @@
         <th scope="row">Linux</th>
         <td>
           the test suite passes on x86-64 in CI. On Debian/aarch64 the whole <code>init</code> flow
-          has also been driven by hand: store modes, identity, the credential helper, a shim
-          executed for real, and the <code>.bashrc</code> PATH line
+          has also been driven by hand: <code>0700</code>/<code>0600</code> modes, identity resolution, the credential helper, a shim
+          executed with the shim dir first on <code>PATH</code>, and the <code>.bashrc</code> branch
         </td>
       </tr>
       <tr>

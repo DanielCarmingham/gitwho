@@ -13,8 +13,8 @@ export interface Recipe {
   problem: string;
   /** A complete accounts.toml, ready to paste into ~/.config/gitwho/accounts.toml. */
   toml: string;
-  /** The exact `gitwho secret set` commands this config's tokens need. */
-  secrets: string[];
+  /** The exact CLI login commands this config's accounts need, once each. */
+  logins: string[];
 }
 
 export const RECIPES: Recipe[] = [
@@ -32,25 +32,26 @@ gitName = "Your Name"
 [[accounts]]
 name = "Personal"
 provider = "github"
+login = "your-personal-username"
 email = "you@example.com"
-gitCredential = "GH_TOKEN"
 sshKey = "~/.ssh/id_ed25519_personal"
 match = ["github.com/your-personal-username/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/personal/"]
 
 [[accounts]]
 name = "Work"
 provider = "github"
+login = "your-work-username"
 email = "you@acme.example.com"
 gitName = "Your Name (Acme)"
-gitCredential = "GH_TOKEN"
 sshKey = "~/.ssh/id_ed25519_work"
 match = ["github.com/your-work-username/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/work/"]
 `,
-    secrets: ['gitwho secret set Personal GH_TOKEN', 'gitwho secret set Work GH_TOKEN'],
+    logins: [
+      'gh auth login --hostname github.com   # as your-personal-username',
+      'gh auth login --hostname github.com   # as your-work-username',
+    ],
   },
   {
     id: 'github-org',
@@ -68,27 +69,28 @@ gitName = "Your Name"
 [[accounts]]
 name = "Personal"
 provider = "github"
+login = "your-personal-username"
 email = "you@example.com"
-gitCredential = "GH_TOKEN"
 sshKey = "~/.ssh/id_ed25519_personal"
 match = ["github.com/your-personal-username/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/personal/"]
 
 [[accounts]]
 name = "Work"
 provider = "github"
+login = "your-work-username"
 email = "you@acme.example.com"
 gitName = "Your Name (Acme)"
-gitCredential = "GH_TOKEN"
 match = [
     "github.com/acme-corp/**",
     "github.com/acme-labs/**",
 ]
-env = ["GH_TOKEN"]
 paths = ["~/src/work/"]
 `,
-    secrets: ['gitwho secret set Personal GH_TOKEN', 'gitwho secret set Work GH_TOKEN'],
+    logins: [
+      'gh auth login --hostname github.com   # as your-personal-username',
+      'gh auth login --hostname github.com   # as your-work-username',
+    ],
   },
   {
     id: 'github-and-gitea',
@@ -96,9 +98,9 @@ paths = ["~/src/work/"]
     problem:
       'One account over https, one over ssh. An https remote authenticates through the ' +
       'credential helper, which needs a token — but an ssh remote authenticates with a key and ' +
-      'involves no token at all for push or pull. The self-hosted account below must not be made ' +
-      'to invent one: it carries `sshKey` and nothing else, and that is a complete, working ' +
-      'account, not an unfinished one.',
+      'involves no token at all for push or pull. The self-hosted account below still names a ' +
+      '`login` and a `url`, because its https API calls need one, but pushing and pulling over ' +
+      'ssh never touches a token at all.',
     toml: `[defaults]
 account = "Personal"
 gitName = "Your Name"
@@ -106,21 +108,25 @@ gitName = "Your Name"
 [[accounts]]
 name = "Personal"
 provider = "github"
+login = "your-personal-username"
 email = "you@example.com"
-gitCredential = "GH_TOKEN"
 match = ["github.com/your-personal-username/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/github/"]
 
 [[accounts]]
 name = "SelfHosted"
 provider = "gitea"
+url = "https://git.example.net"
+login = "you"
 email = "you@example.net"
 sshKey = "~/.ssh/id_ed25519_selfhosted"
 match = ["ssh.git.example.net/**"]
 paths = ["~/src/selfhosted/"]
 `,
-    secrets: ['gitwho secret set Personal GH_TOKEN'],
+    logins: [
+      'gh auth login --hostname github.com   # as your-personal-username',
+      'tea login add --url https://git.example.net   # as you',
+    ],
   },
   {
     id: 'adding-a-third',
@@ -137,31 +143,35 @@ gitName = "Your Name"
 [[accounts]]
 name = "Personal"
 provider = "github"
+login = "your-personal-username"
 email = "you@example.com"
-gitCredential = "GH_TOKEN"
 match = ["github.com/your-personal-username/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/personal/"]
 
 [[accounts]]
 name = "Work"
 provider = "github"
+login = "your-work-username"
 email = "you@acme.example.com"
 gitName = "Your Name (Acme)"
-gitCredential = "GH_TOKEN"
 match = ["github.com/acme-corp/**"]
-env = ["GH_TOKEN"]
 paths = ["~/src/work/"]
 
-# --- New: a third account, self-hosted, ssh only -----------------------------
+# --- New: a third account, self-hosted ---------------------------------------
 [[accounts]]
 name = "SelfHosted"
 provider = "gitea"
+url = "https://git.example.net"
+login = "you"
 email = "you@example.net"
 sshKey = "~/.ssh/id_ed25519_selfhosted"
 match = ["ssh.git.example.net/**"]
 paths = ["~/src/selfhosted/"]
 `,
-    secrets: ['gitwho secret set Personal GH_TOKEN', 'gitwho secret set Work GH_TOKEN'],
+    logins: [
+      'gh auth login --hostname github.com   # as your-personal-username',
+      'gh auth login --hostname github.com   # as your-work-username',
+      'tea login add --url https://git.example.net   # as you',
+    ],
   },
 ];

@@ -20,9 +20,10 @@ Why it is built this way is in [DESIGN.md](DESIGN.md).
 | a POSIX shell | zsh and bash are what the shims are written for |
 
 **Platform reality.** Everything below has been run on macOS, and on Debian
-(aarch64) — including the store permissions, the credential helper, a shim
-executed for real, and the `PATH` line landing in `.bashrc` rather than
-`.zshrc`. x86-64 Linux is covered by CI but has not been driven by hand.
+(aarch64) — including the config directory's `0700`/`0600` permissions, the
+credential helper, a shim executed for real, and the `PATH` line landing in
+`.bashrc` rather than `.zshrc`. x86-64 Linux is covered by CI but has not been
+driven by hand.
 
 Windows is *unverified in the strong sense*: the `%APPDATA%` path, the `.cmd`
 shim and the `PATHEXT` lookup are unit-tested as pure functions from macOS and
@@ -67,11 +68,11 @@ gitwho init             # dry run: lists every step, writes nothing
 gitwho init --write
 ```
 
-The first `--write` creates the store, scaffolds `accounts.toml` from the
-template, and **stops**:
+The first `--write` creates `~/.config/gitwho` (owner-only), scaffolds
+`accounts.toml` from the template, and **stops**:
 
 ```
-created       ~/.config/gitwho/identity.key (owner-only)
+created       ~/.config/gitwho (owner-only)
 created       ~/.config/gitwho/accounts.toml
 
 Now the part only you can do:
@@ -223,22 +224,26 @@ Everything below is what the one command automates. Read it if you want to
 place things yourself, if `init` reported a file as `missing`, or if something
 is not behaving and you need to know which piece to look at.
 
-### The store, at `0700`
+### The config directory, at `0700`
+
+`gitwho init --write` creates `~/.config/gitwho` at `0700` directly, rather
+than `mkdir -p` followed by a `chmod` — the usual `022` umask leaves a plain
+`mkdir` at `0755`, group- and world-traversable, and creating it at the right
+mode from the start means there is no window where the directory is complete
+and readable before it is locked down. Doing it by hand:
 
 ```sh
-gitwho secret init
+mkdir -m 700 -p ~/.config/gitwho
 ```
 
-Use this rather than `mkdir -p`. It creates `~/.config/gitwho` owner-only
-(`0700`) and writes `identity.key` at `0600`; `mkdir` applies your umask, and
-the usual `022` leaves the directory `0755` — group- and world-traversable,
-which is the only thing keeping the identity key and every stored token out of
-another local account's reach. `doctor` treats anything but `0700` as a
-failure, so a hand-made directory fails on its first run.
+`doctor` treats anything but `0700` as a failure, so a hand-made directory
+that used plain `mkdir` fails on its first run; `init` tightens a looser
+existing directory the same way it creates a fresh one.
 
 `accounts.toml` is written `0600` for a different reason: it is a **redirect
 vector**. Whoever can write it can add a `match` pattern for a host they
-control and be handed one of your tokens.
+control and be handed one of your tokens — gitwho holds no other secret for
+that directory to protect.
 
 ### The generated rules
 
@@ -309,9 +314,9 @@ rather than doing it silently.
 That matters twice over. gh refuses to store credentials at all while
 `GH_TOKEN` is set, and the shim is what sets it -- so without this, a shimmed
 `gh auth login` could never succeed, in any directory. And an account declared
-in `accounts.toml` but never used has nothing stored yet, which the ordinary
-path reports as a missing secret; logging in is how you fix that, so it is the
-one thing that must not be blocked by it.
+in `accounts.toml` whose CLI login does not exist yet has no token to give, which
+the ordinary path reports as a problem; logging in is how you fix that, so it
+is the one thing that must not be blocked by it.
 
 Clearing still happens. Stepping aside means injecting nothing, not letting a
 token the shell already exported reach a tool that would authenticate as it.
@@ -339,11 +344,12 @@ gitwho doctor
 env | grep -E 'GH_TOKEN|GITEA_TOKEN'    # expect nothing
 ```
 
-`doctor` is read-only and exits non-zero on problems. It checks store
-permissions first, because a readable store makes every other check moot. An
-`[ambient]` warning means a provider token is sitting in your environment where
-every process can read it — gitwho does not need it, and that warning is the
-exposure the tool exists to remove.
+`doctor` is read-only and exits non-zero on problems. It checks the config
+directory's permissions first, because a writable `accounts.toml` is a
+redirect vector that makes every other check moot. An `[ambient]` warning
+means a provider token is sitting in your environment where every process can
+read it — gitwho does not need it, and that warning is the exposure the tool
+exists to remove.
 
 **2. Does identity follow the repository rather than its location?**
 
@@ -375,24 +381,54 @@ not early enough on `PATH`.
 
 ## A second machine, or a rebuilt one
 
-If your dotfiles are in version control, they carry roughly everything except
-the part that matters most.
-
-**Carried by dotfiles:** `accounts.toml` (it names variables, never values),
-the `[include]` line, the `PATH` line.
-
-**Not carried, and not carryable:** `identity.key` and `secrets.age`. They are
-the store. Committing them would put every token in a repository, so on a new
-machine you re-create them:
+If your dotfiles are in version control, they carry everything gitwho needs —
+`accounts.toml` names logins, never values, so there is no store to re-create:
 
 ```sh
 cargo install --path . --locked      # the binary is not in your dotfiles either
-gitwho secret set <Account> <VAR>    # once per token
 gitwho init --write                  # regenerates everything; paths differ per machine
 ```
 
-There is no way around re-entering the tokens by hand. That is deliberate: it
-is the cost of the store never being in a repo.
+`init --write` still stops if `accounts.toml` is missing, but a dotfiles
+checkout already has it, so the run that matters is logging the CLIs in as
+each account's `login` — `gh auth login`, `tea login add --url <url>` — before
+tokens are asked for. `doctor` names exactly which account still needs it.
+
+## Upgrading from 0.2
+
+0.3 removes the `env` and `gitCredential` fields, and with them the secret
+store they drew from — `identity.key` and `secrets.age`. A config still using
+either field fails to parse, with an error naming the field. There is no
+automatic converter: the old fields named a variable, the new schema names a
+provider and a login, and nothing here can be translated mechanically. The
+one existing config was converted by hand.
+
+Per account, in `accounts.toml`:
+
+1. Delete `env` and `gitCredential`.
+2. Check that each account's existing `provider` is `"github"`, `"gitea"`, or
+   `"forgejo"` (`"forgejo"` means the same as `"gitea"`), since 0.3 rejects any
+   other value.
+3. Add `login`: the `gh` login, or the user your `tea` login for that server
+   holds, that this account's token already lives under.
+4. For a `gitea` account, add `url`: the server's https address. Required for
+   `gitea`, rejected for `github`, which always means github.com.
+
+Then log the CLIs in as each account's `login`, and confirm:
+
+```sh
+gh auth login --hostname github.com     # once per GitHub login, if not already
+tea login add --url <url>               # once per Gitea/Forgejo server
+gitwho doctor                           # confirms every account's token answers
+```
+
+Only once `doctor` is clean, delete the leftover store by hand — `doctor`
+reports `secrets.age` and `identity.key` as unused but never deletes them
+itself:
+
+```sh
+rm ~/.config/gitwho/secrets.age ~/.config/gitwho/identity.key
+```
 
 ## Things that will bite you
 

@@ -43,9 +43,11 @@ of them is a security bug, not a feature request:
 - **A token value leaving the process.** Appearing in output, an error message,
   a log, a generated file, or `argv` — anywhere `ps`, a shoulder, or a pasted
   transcript could pick it up. Only fingerprints are ever printed.
-- **Store permissions widening.** The store directory is `0700` and the
-  identity key, secrets file and `accounts.toml` are `0600`. That directory is
-  the only thing keeping the key out of another local account's reach.
+- **Config permissions widening.** `~/.config/gitwho` is `0700` and
+  `accounts.toml` is `0600`. That is what keeps `accounts.toml` out of another
+  local account's reach — a writable config is a redirect vector: whoever can
+  write it can add a `match` pattern for a host they control and be handed a
+  token.
 - **A credential served for a host no account claims.** The helper declines
   when resolution is not confident; serving anyway would be a redirect.
 
@@ -55,25 +57,23 @@ These are known, documented, and explained in
 [docs/DESIGN.md](docs/DESIGN.md#what-this-protects-and-what-it-does-not).
 Reports about them are welcome as ideas, but they are not undisclosed holes:
 
-- **A local process running as you can read everything.** The age identity key
-  sits on disk beside the encrypted secrets, both owned by you, so anything
-  running as your user decrypts both. The encryption defends the secrets *at
-  rest* — a backup, a sync folder, an accidental commit — and not against local
-  code.
+- **A local process running as you can read everything.** gitwho holds no
+  secret of its own: a token lives in `gh`'s keychain entry, or in `tea`'s own
+  `credentials.json.enc` with its key in the keychain — both owned by you, both
+  readable by anything running as your user.
 
-  It is worth being blunt about how low that bar is, because "age-encrypted"
-  reads like a stronger claim than it is. Code running as you does not need to
-  find the key or touch the ciphertext at all; it can just ask:
+  It is worth being blunt about how low that bar is, because "gitwho decides
+  who gets logged in" reads like a stronger claim than it is. Code running as
+  you does not need to go through gitwho at all; it can just ask:
 
   ```sh
-  printf 'protocol=https\nhost=github.com\npath=Org/repo.git\n' | gitwho credential get
+  gh auth token --hostname github.com --user octocat
   ```
 
-  and get `password=<the token>` back. gitwho is a decryption oracle for its own
-  store by construction — that is precisely how it answers git. This is no
-  harder than reading `GH_TOKEN` out of a `.bashrc`, or running `gh auth token`,
-  and gitwho is **not** an improvement on either against local code. Reports
-  demonstrating this are not vulnerabilities; it is the documented design.
+  and get the same token back. This is no harder than running that command
+  directly, and gitwho is **not** an improvement on it against local code.
+  Reports demonstrating this are not vulnerabilities; it is the documented
+  design.
 
   What actually improves is *exposure over time*: a token lives in one process
   for one invocation instead of in every process you launch for the whole
@@ -83,12 +83,8 @@ Reports about them are welcome as ideas, but they are not undisclosed holes:
   `gh` and `tea` read it, so during `gitwho exec` the value is visible in that
   child's environment to your own user. The gain is scope, not absence: one
   process for one invocation, instead of every process for the whole session.
-- **A dead token looks like a live one.** `doctor` reports that a value is
-  stored, not that the provider still accepts it.
-- **The platform keychain is not the default.** It is implemented, and not
-  selected automatically, because macOS keys its ACL to the calling binary's
-  code hash — so every rebuild of an unsigned binary blocks on a GUI prompt, on
-  a helper that runs on every fetch. See `examples/keychain_probe.rs`.
+- **A dead token looks like a live one.** `doctor` reports that the CLI answers
+  for an account, not that the provider still accepts the token it hands back.
 - **Anything on Windows.** The Windows paths and shim are unit-tested as pure
   functions and have never been executed on Windows. Treat that platform as
   unverified rather than as broken or as working.
@@ -96,8 +92,6 @@ Reports about them are welcome as ideas, but they are not undisclosed holes:
 ## If you think a token has been exposed
 
 Rotate it at the provider first — that is the only step that actually revokes
-anything. Then `gitwho secret set <Account> <VAR>` to store the replacement,
-and `gitwho secret list` to confirm the fingerprint changed.
-
-If the store itself may have been read, rotate **every** token in it and
-re-create the identity key: the one key decrypts all of them.
+anything — then log the CLI back in as that login (`gh auth login`, or
+`tea login add --url <url>`). gitwho keeps no copy to invalidate: the next
+`gitwho exec` reads whatever `gh`/`tea` now hold.

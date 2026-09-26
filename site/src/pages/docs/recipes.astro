@@ -21,11 +21,10 @@ const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: rec
     </p>
     <p>
       Copy the config into <code>~/.config/gitwho/accounts.toml</code>, replace the placeholder
-      usernames, emails and hosts with your own, then run the <code>secret set</code> commands
-      for whichever tokens it names. Then run <code>gitwho init --write</code> again — an account
-      you have just added has no <code>includeIf</code> rule until you regenerate, so until you do,
-      its repositories keep resolving to your global identity. Finish with
-      <code>gitwho doctor</code>.
+      usernames, emails and hosts with your own, then run the login commands for whichever
+      accounts it names. Then run <code>gitwho init --write</code> again — an account you have
+      just added has no <code>includeIf</code> rule until you regenerate, so until you do, its
+      repositories keep resolving to your global identity. Finish with <code>gitwho doctor</code>.
     </p>
   </div>
 
@@ -47,17 +46,17 @@ const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: rec
           )}
         </p>
         <CodeBlock code={recipe.toml} lang="toml" label={`the ${recipe.title} accounts.toml`} />
-        {recipe.secrets.length > 0 && (
+        {recipe.logins.length > 0 && (
           <>
-            <p class="label">store the tokens, then regenerate</p>
+            <p class="label">log the CLIs in, then regenerate</p>
             {/*
               `init --write` is appended here rather than stored in the recipe
-              data: `secrets` is exactly the `secret set` commands, and
-              tests/recipes.test.ts cross-checks that list against the variables
-              each account declares.
+              data: `logins` is exactly the `gh auth login` / `tea login add`
+              commands, and tests/recipes.test.ts cross-checks that list
+              against the accounts each config declares.
             */}
             <CodeBlock
-              code={[...recipe.secrets, 'gitwho init --write'].join('\n')}
+              code={[...recipe.logins, 'gitwho init --write'].join('\n')}
               lang="sh"
               label={`${recipe.title} setup commands`}
             />
@@ -78,9 +77,10 @@ const headings = RECIPES.map((recipe) => ({ depth: 2, slug: recipe.id, text: rec
     <p>
       Then <code>gitwho doctor</code>. It is read-only, exits non-zero on problems, and never prints
       a secret value — so its output is always safe to paste when asking for help. It reports that
-      the store's permissions are intact, that every token the config names is present, and that
-      git's credential helper actually reaches gitwho. It does not compare the generated rules
-      against your config, so it will not tell you that you forgot to regenerate.
+      the config directory's permissions are intact, that every account's login still answers when
+      asked for a token, and that git's credential helper actually reaches gitwho. It does not
+      compare the generated rules against your config, so it will not tell you that you forgot to
+      regenerate.
     </p>
   </div>
 </DocsLayout>

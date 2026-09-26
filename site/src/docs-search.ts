@@ -51,7 +51,7 @@ export function buildSearchDocuments({
       href: '/docs/recipes/',
       body: normalizeSearchText(
         recipes
-          .map((recipe) => [recipe.title, recipe.problem, recipe.toml, ...recipe.secrets].join('\n'))
+          .map((recipe) => [recipe.title, recipe.problem, recipe.toml, ...recipe.logins].join('\n'))
           .join('\n\n'),
       ),
     },

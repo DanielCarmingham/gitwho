@@ -45,17 +45,17 @@ const init = `gitwho init
 gitwho init --write`;
 
 /* Reproduced from docs/INSTALL.md, which reproduces what `init --write` prints. */
-const stop = `created       ~/.config/gitwho/identity.key (owner-only)
+const stop = `created       ~/.config/gitwho (owner-only)
 created       ~/.config/gitwho/accounts.toml
 
 Now the part only you can do:
 
   1. edit ~/.config/gitwho/accounts.toml
      replace the example accounts with yours
-  2. gitwho secret set <Account> <VAR>    once per token
+  2. log gh (or tea) in as each account's \`login\`
   3. gitwho init --write                  re-run to finish`;
 
-const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
+const finish = [...worked.logins, 'gitwho init --write'].join('\n');
 ---
 
 <section class="qs" aria-labelledby="quickstart">
@@ -101,7 +101,8 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
         </p>
         <CodeBlock code={init} lang="sh" label="the two init commands" />
         <p>
-          The second creates the store, scaffolds an empty <code>accounts.toml</code>, and halts:
+          The second creates <code>~/.config/gitwho</code>, scaffolds an empty
+          <code>accounts.toml</code>, and halts:
         </p>
         <CodeBlock code={stop} label="what init --write prints when it stops" />
         <p class="note">
@@ -118,9 +119,9 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
       <div class="qs__body prose">
         <h3>Write your accounts</h3>
         <p>
-          Open <code>~/.config/gitwho/accounts.toml</code>. It names environment variables and never
-          holds their values, which is what lets it live in a dotfiles repo. A complete two-account
-          config:
+          Open <code>~/.config/gitwho/accounts.toml</code>. Each account names a <code>provider</code>
+          and a <code>login</code> — never a token — which is what lets it live in a dotfiles repo. A
+          complete two-account config:
         </p>
         <CodeBlock code={worked.toml} lang="toml" label="the worked accounts.toml" />
         <p>
@@ -137,17 +138,14 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
     <li class="qs__step">
       <span class="qs__n" aria-hidden="true">4</span>
       <div class="qs__body prose">
-        <h3>Store the tokens, then finish</h3>
-        <CodeBlock code={finish} lang="sh" label="the secret set and init commands" />
+        <h3>Log the CLIs in, then finish</h3>
+        <CodeBlock code={finish} lang="sh" label="the login and init commands" />
         <p>
-          <code>secret set</code> reads the value from stdin, so it never enters <code>argv</code>,
-          because <code>ps</code> is public. Stored values are printed back only as fingerprints.
-        </p>
-        <p>
-          If <code>gh</code> is already logged in as that account you can skip storing a token
-          altogether — <code>env = [&#123; var = "GH_TOKEN", from = "gh", user = "..." &#125;]</code>
-          reads it from <code>gh</code> on demand, so there is no copy to keep in sync.
-          <a href="/docs/install/">Installing gitwho</a> covers when that is worth doing.
+          gitwho stores no token of its own. <code>login</code> names the <code>gh</code> or
+          <code>tea</code> login that already holds — or will hold, once you log in — this
+          account's token, and <code>exec</code> asks that CLI for it on every invocation. There is
+          no copy to keep in sync, and rotating a token at the provider takes effect on the next
+          call.
         </p>
         <p>
           <code>init</code> is idempotent. Re-run it whenever you add an account; every step reports
@@ -162,9 +160,10 @@ const finish = [...worked.secrets, 'gitwho init --write'].join('\n');
     <p>Then, after any change:</p>
     <CodeBlock code="gitwho doctor" lang="sh" label="the doctor command" />
     <p>
-      A healthy run prints <code>ok</code> for every check and exits zero — the store's permissions
-      are intact, every token the config names is present, and git's credential helper actually
-      reaches gitwho. <a href="#doctor">What that looks like</a> is below.
+      A healthy run prints <code>ok</code> for every check and exits zero — the config's
+      permissions are intact, every account's login answers when asked for a token, and git's
+      credential helper actually reaches gitwho. <a href="#doctor">What that looks like</a> is
+      below.
     </p>
   </div>
 </section>

@@ -92,7 +92,7 @@ config silently.
 
 ```sh
 gitwho init             # dry run: lists every step, writes nothing
-gitwho init --write     # creates the store, scaffolds accounts.toml, stops
+gitwho init --write     # creates ~/.config/gitwho (0700), scaffolds accounts.toml, stops
 ```
 
 It stops there on purpose, because the next part is the one thing it cannot do
@@ -187,7 +187,7 @@ easy to paper over:
 | | |
 |---|---|
 | macOS | verified — this is where it runs every day |
-| Linux | the test suite passes on x86-64 in CI. On Debian/aarch64 the whole `init` flow has also been driven by hand: store modes, identity, the credential helper, a shim executed for real, and the `.bashrc` PATH line |
+| Linux | the test suite passes on x86-64 in CI. On Debian/aarch64 the whole `init` flow has also been driven by hand: `0700`/`0600` modes, identity resolution, the credential helper, a shim executed with the shim dir first on `PATH`, and the `.bashrc` branch |
 | Windows | the `%APPDATA%` path, the `.cmd` shim and the `PATHEXT` lookup are unit-tested as pure functions **from macOS, and have never run on Windows**. Do not treat them as working |
 
 **What it does not cover yet.** `jj` takes its credentials from git, so pushing
@@ -198,51 +198,43 @@ are in [docs/DESIGN.md](docs/DESIGN.md#known-limits).
 
 ## Security
 
-The property that matters is not the encryption — it is that **a token is
-fetched by the one process that needs it, at the moment it needs it**, instead
-of sitting in your environment where everything you launch inherits it. `exec`
-clears every managed variable before setting the resolved account's, so nothing
-ambient survives into the child.
+The property that matters is not encryption — gitwho stores no secret at all.
+It is that **a token is fetched by the one process that needs it, at the
+moment it needs it**, instead of sitting in your environment where everything
+you launch inherits it. `exec` clears every managed variable before setting
+the resolved account's, so nothing ambient survives into the child.
 
-Around that: stored values live in an age-encrypted file unlocked by an identity
-key, both created `0600` inside a `0700` directory — and created at that mode
-rather than chmod'd afterwards, so there is no window where the file is complete
-and readable. Values never enter `argv` (`secret set` reads stdin, because `ps`
-is public), are never printed (only fingerprints), and never enter the
-repository (`accounts.toml` names variables). `doctor` fails outright if those
-permissions drift, and warns when a provider token is sitting in your
-environment — the exposure this exists to remove.
+An account names a `provider` and a `login`, never a value, which is what lets
+`accounts.toml` itself be committed to a dotfiles repo — there is nothing
+secret in it to leak. The directory it lives in is still `0700` and the file
+`0600`, because a writable config is a redirect vector: whoever can write it
+can add a `match` pattern for a host they control and be handed a token.
 
-A variable can also name a tool that already holds its value, in which case
-gitwho stores nothing at all and reads it on demand:
+Tokens come from the provider's own CLI, read fresh on every invocation:
 
-```toml
-env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
+```sh
+gh auth token --hostname github.com --user octocat
 ```
 
-That is a pointer, not a copy, so it cannot go stale when you rotate the token —
-and on macOS the value stays in `gh`'s keychain entry rather than gitwho's file.
-It costs a process spawn (~60 ms against ~10 ms), which is why it is declared
-per variable rather than switched on globally. If the tool cannot answer,
-gitwho fails and says so; it never falls back to a stored copy.
+That is a pointer, not a copy, so it cannot go stale when you rotate the
+token — the value stays wherever `gh` or `tea` already keeps it (the macOS
+keychain for `gh`; `tea`'s own `credentials.json.enc`, keyed by the keychain).
+Values are never printed by gitwho (only fingerprints) and never enter `argv`.
+If the CLI cannot answer, gitwho fails and says so; it never falls back to
+another source or another account.
 
-**What it does not do:** the identity key sits next to the ciphertext, both
-owned by you, so anything running as your user can decrypt everything. The
-encryption defends the secrets at rest — a backup, a sync folder, an accidental
-commit — not against local code.
+**What it does not do:** gitwho holds no secret, so there is nothing of its own
+to defend. A token lives wherever `gh`/`tea` put it, owned by you, so anything
+running as your user can read the same token gitwho would ask for.
 
-Be concrete about that, because "encrypted" invites the wrong conclusion.
-Anything running as you can pipe a request into `gitwho credential` and be
-handed the token in plain text. gitwho is a decryption oracle for its own
-store — it has to be, that is how it answers git. Getting a token out of it is
-no harder than reading `GH_TOKEN` out of your `.bashrc`, or running
-`gh auth token`. **Against local code running as you, this is not an
-improvement on either, and does not claim to be.** What changes is exposure
-over time: a token is present in one process for one invocation, instead of in
-every process for the whole session.
+Be concrete about that, because "gitwho decides who gets logged in" invites the
+wrong conclusion. Anything running as you can run `gh auth token` directly and
+get the same value gitwho would. **Against local code running as you, gitwho
+is not an improvement on asking `gh` or `tea` directly, and does not claim to
+be.** What changes is exposure over time: a token is present in one process for
+one invocation, instead of in every process for the whole session.
 
-The full threat model, including why the platform keychain is implemented but
-not the default, is in
+The full threat model is in
 [docs/DESIGN.md](docs/DESIGN.md#what-this-protects-and-what-it-does-not).
 To report a vulnerability, see [SECURITY.md](SECURITY.md) — please use private
 reporting rather than a public issue.
