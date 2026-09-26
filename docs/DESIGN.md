@@ -151,21 +151,43 @@ silent failure.
 - A self-hosted Gitea or Forgejo is commonly reached over ssh for push/pull —
   git authenticates with a key via `core.sshcommand`, and no token is involved
   in the transport path — *and* over https for its API, which does need one.
-- Each CLI reads its own variables: `gh` → `GH_TOKEN`; `tea` → `GITEA_TOKEN`
-  and `GITEA_INSTANCE_URL`; `glab` → `GITLAB_TOKEN`; `az devops` its own.
-  `tea` needs *both* before it builds a login from the environment, and that
-  login then overrides any login stored in its own config. Anything else,
-  `GITEA_HOST` included, is ignored without a word, and tea falls back to its
-  stored login. Measured with tea 0.15.1 against unresolvable `.invalid`
-  hosts, reading the host each run dialed. `gitea-mcp` is a separate
-  consumer with its own names, `GITEA_HOST` and `GITEA_ACCESS_TOKEN` (per its
-  README), which is why `doctor` checks tea's pair without calling
-  `GITEA_HOST` a mistake.
+- Each provider's tools read their own variables, and the provider decides all
+  of them — not the config, which never names one:
+
+  | Provider | Variable | Value |
+  |---|---|---|
+  | github | `GH_TOKEN` | token |
+  | github | `GITHUB_PERSONAL_ACCESS_TOKEN` | token |
+  | gitea | `GITEA_TOKEN` | token |
+  | gitea | `GITEA_INSTANCE_URL` | url |
+  | gitea | `GITEA_ACCESS_TOKEN` | token |
+  | gitea | `GITEA_HOST` | url |
+
+  Sources: `gh help environment` (gh 2.101.0); the `github-mcp-server` and
+  `gitea-mcp` READMEs; `tea`'s `GetLoginByEnvVar` plus the fake-host
+  measurement below.
+
+  Measured with tea 0.15.1 against unresolvable `.invalid` hosts, reading the
+  host each run dialed: an env login needs *both* `GITEA_TOKEN` and
+  `GITEA_INSTANCE_URL` before `tea` builds one, and that login then overrides
+  whatever is stored in its own config; `GITEA_HOST` is read by nothing in
+  `tea` and is ignored without a word. `tea login helper get` returns the
+  *first* login for a host regardless of which user was asked for. `tea login
+  ls -o json` never prints a token, for any login. `tea login ls -o json`
+  median 14 ms, `tea login helper get` median 17 ms, both against plaintext
+  fake logins.
 
 Transport is a property of a **remote**, not of an account: git picks it per
 remote, and a credential helper is only ever consulted for https. An account
 using both needs no special case, which is why there is no `gitAuth` field to
 get wrong.
+
+Every token is read from `gh` or `tea` **per invocation** rather than kept: no
+second copy exists to disagree with the one the CLI holds, and rotation or
+revocation is visible on the next call rather than leaving gitwho holding a
+credential that is present, decryptable and wrong. **A provider's CLI that
+cannot answer is an error, never a fallback** — not to another source, and not
+to another account (R8).
 
 ### The secret store: two measurements that overturned the first choice
 
@@ -199,51 +221,10 @@ chooses them automatically, because they do not draw the same boundary:
 Only the first is stronger than an age file that is already `0600` and owned by
 you. On the other two, flipping the default would buy nothing measurable.
 
-### Referencing a token beats copying one
-
-Most machines already hold the tokens gitwho wants. The tempting move is to
-import them, and it is the wrong one: a copy is correct until the original is
-rotated, after which gitwho holds a credential that is present, decryptable and
-wrong — the R8 failure, introduced by the feature meant to make setup easier.
-The development machine already had an instance of it, an account `gh` reports
-as having an invalid token, sitting in a config nobody revisits.
-
-So a variable may name where its value lives instead, and gitwho stores nothing:
-
-```toml
-env = [{ var = "GH_TOKEN", from = "gh", user = "octocat" }]
-```
-
-Measured against gh 2.97.0, macOS, 2026-08-13:
-
-| | |
-|---|---|
-| `gh auth token --hostname H --user U` | reads one named account — **no `gh auth switch`**, so no process-wide active account is mutated (R9) |
-| ambient `GH_TOKEN` set to a decoy | ignored; the named account's real token still came back |
-| account absent | exit 1, `no oauth token found for github.com account X` |
-| cost | **~60 ms**, against ~10 ms for a store read |
-
-That last row is why this is declared per variable rather than switched on
-globally: R15's budget is untouched for anyone who does not opt in. It also
-means the at-rest question changes shape for referenced variables — on macOS
-the value sits in `gh`'s keychain entry, which `gh` reads without prompting,
-rather than in gitwho's file.
-
-**A declared source that cannot answer is an error, never a fallback.** Not to
-the store, and not to the environment. Falling back would produce a
-working-but-wrong credential from a *stale copy* — precisely the thing
-referencing exists to stop keeping.
-
-Two implementation notes worth not rediscovering:
-
-- **Resolving `gh` normally re-enters gitwho.** The shim directory leads `PATH`
-  and its `gh` runs `gitwho exec -- /real/gh`, so the credential helper asking
-  for a token calls itself. The runner skips its own shim directories. The
-  symptom looked like a config parse error rather than a loop.
-- **Referencing does not replace the store.** It only works where another tool
-  owns the credential and can be asked per account. A token no CLI owns, a PAT
-  scoped more narrowly than gh's OAuth token, and providers whose CLI keeps a
-  refresh-token cache rather than a static string are all still the store's job.
+**Resolving `gh` normally re-enters gitwho.** The shim directory leads `PATH`
+and its `gh` runs `gitwho exec -- /real/gh`, so asking `gh` for a token calls
+itself. The runner skips its own shim directories. The symptom looked like a
+config parse error rather than a loop.
 
 ---
 
@@ -391,13 +372,12 @@ throughout the source.
 - **R5 — Both axes.** Git transport auth *and* CLI credentials. Solving only
   one leaves a split brain: committing as one account while authenticating as
   another.
-- **R6 — Multi-provider, multi-CLI.** Adding a provider does not require
-  changing the resolution mechanism — only declaring the new provider's
-  variables. Adding Codeberg is about six lines with `provider = "gitea"` and a
-  different host.
-- **R7 — Both auth mechanisms.** Token-authenticated (https) and
-  key-authenticated (ssh) accounts are both first-class. An ssh account is not
-  required to invent a token it does not use.
+- **R6 — Multi-provider, multi-CLI.** Adding a provider is a row in
+  `provider.rs` plus its token source, with a test — not configuration. Asking
+  users to restate which variables a tool reads is how `GITEA_HOST` came to be
+  documented for a tool that never reads it.
+- **R7 — Both auth mechanisms.** Pushing over ssh never involves a token; every
+  account still names a CLI login, and `doctor` reports a missing one.
 
 ### Safety
 
@@ -484,8 +464,8 @@ the second is the one to act on.
   Dock — inherits no shim `PATH` and no environment. Git identity and git
   transport are still correct there, because both come from gitconfig. A CLI
   invoked from inside that application is not covered.
-- **A stored-but-dead token looks identical to a working one.** `doctor`
-  reports that a value exists, not that the provider still accepts it.
-- **`provider` is required by the parser and read by nothing.** `mcp sync`
-  recognises provider servers from their command. It is declared for the day
-  something needs it.
+- **A token the server has revoked but the CLI still hands out looks healthy
+  to `doctor`**; detecting it needs the network (`doctor --check-remote`,
+  planned).
+- **Two accounts on one Gitea server are unsupported** (tea picks the first
+  login per host).

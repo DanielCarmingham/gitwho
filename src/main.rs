@@ -32,8 +32,8 @@ Examples:
     git add . && git commit -m 'Initial commit' && git push -u origin main
 
   The same on Gitea or Forgejo. `tea` creates the repository but adds no
-  remote, so add it yourself. It authenticates from the account's
-  GITEA_TOKEN and GITEA_INSTANCE_URL, and silently ignores GITEA_HOST.
+  remote, so add it yourself. It authenticates as the account's tea login,
+  which exec hands it as GITEA_TOKEN and GITEA_INSTANCE_URL.
     gitwho exec --account SelfHosted -- \\
         tea repos create --name acme-widget --private
     git remote add origin git@ssh.git.example.net:you/acme-widget.git";

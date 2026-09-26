@@ -36,15 +36,18 @@ One file declares your accounts. Nothing else needs editing when you add one.
 
 ```toml
 [[accounts]]
-name          = "Work"
-email         = "you@example-corp.com"
-gitCredential = "GH_TOKEN"          # names the variable; the value is in the store
-match         = ["github.com/example-corp/**"]
-env           = ["GH_TOKEN"]        # what `exec` injects
+name     = "Work"
+provider = "github"
+login    = "you-at-work"             # the gh login; gitwho asks gh for the token
+email    = "you@example-corp.com"
+match    = ["github.com/example-corp/**"]
 ```
 
-`match` runs against `host/path`, which is why several GitHub accounts on one
-host can be told apart — by organisation, with no directory layout implied.
+`provider` decides which variables `exec` sets — a GitHub account gets
+`GH_TOKEN`, a Gitea or Forgejo account gets `GITEA_TOKEN` and
+`GITEA_INSTANCE_URL` — so nothing here declares a variable by name. `match`
+runs against `host/path`, which is why several GitHub accounts on one host can
+be told apart — by organisation, with no directory layout implied.
 
 ## Install
 
@@ -103,19 +106,14 @@ gitwho init --discover ~/src            # prints a proposal, writes nothing
 It groups every `remote.origin.url` it finds by `host/org` and prints a config
 you can pipe into a file. It **cannot** know which orgs are the same person, so
 it says so rather than guessing — merging those blocks is the part left to you.
-Then
+Then log `gh`/`tea` in as each account's `login` (`gh auth login`,
+`tea login add --url …`) — `exec` reads the token from whichever CLI the
+account's `provider` names, on demand, so there is no token to store. Finish
+with:
 
 ```sh
-gitwho secret set Work GH_TOKEN    # once per token; the value never enters argv
-gitwho secret set --here          # or let the repository you are in name the account
 gitwho init --write                # finishes, and ends by running doctor
 ```
-
-If `gh` is already logged in as that account, you can skip storing a token
-altogether — `env = [{ var = "GH_TOKEN", from = "gh", user = "..." }]` reads it
-from `gh` on demand, so there is no copy to keep in sync. Declare every variable
-that way and there is no secret store to set up at all. See
-[Security](#security).
 
 `init` is idempotent — re-run it whenever you add an account. Every step
 reports `ok` when there was nothing to do, so a second run tells you exactly
@@ -149,10 +147,8 @@ gitwho exec --account SelfHosted -- tea repos create --name acme-widget --privat
 git remote add origin git@ssh.git.example.net:you/acme-widget.git
 ```
 
-`tea` authenticates from `GITEA_TOKEN` **and** `GITEA_INSTANCE_URL`, so the
-account needs both in `env`. It reads no other name for the URL: declare
-`GITEA_HOST` instead and it silently falls back to the login in its own config.
-`doctor` reports an account that declares only one of the two.
+`exec` hands tea the account's token and URL under the names it reads; the
+account needs `provider = "gitea"`, `url` and `login`.
 
 Once the remote exists, nothing needs naming again — every later `gh`, `tea`,
 push and commit resolves from it.
@@ -164,13 +160,10 @@ gitwho init          set everything up; safe to re-run
 gitwho init --discover <roots>   propose accounts.toml from repos on disk
 gitwho doctor        report whether the wiring is coherent (read-only)
 gitwho whoami        which account this repository resolves to, and why
-gitwho renew         bring this repository's credentials up to date,
-                     pulling from gh (or logging in) rather than asking you to
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
 gitwho shim install  wrapper scripts for gh / tea
-gitwho secret …      store tokens; only fingerprints are ever printed
 gitwho mcp sync      route provider MCP servers through exec
 ```
 

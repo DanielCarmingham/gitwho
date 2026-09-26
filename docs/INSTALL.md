@@ -78,8 +78,7 @@ Now the part only you can do:
 
   1. edit ~/.config/gitwho/accounts.toml
      replace the example accounts with yours
-  2. gitwho secret set <Account> <VAR>    once per token
-     (or `gitwho secret set --here`, from inside a repository that account owns)
+  2. log gh (or tea) in as each account's `login`
   3. gitwho init --write                  re-run to finish
 ```
 
@@ -88,8 +87,9 @@ give you a machine that looks configured and resolves every repository to an
 account that does not exist — working-but-wrong, which is the failure this tool
 exists to prevent.
 
-So: edit the config (see [the schema](#the-config) below), store your tokens,
-and run it a third time. Now it finishes, and ends by running `doctor`.
+So: edit the config (see [the schema](#the-config) below), log the CLIs in
+(see [Logging the CLIs in](#logging-the-clis-in) below), and run it a third
+time. Now it finishes, and ends by running `doctor`.
 
 ### Step 1 from what is already on disk
 
@@ -124,86 +124,36 @@ worktrees of one repository collapse to a single entry. Every URL form git
 writes is understood, including scp-style with a non-`git` user, because this
 reuses the resolver's own parsing rather than a second spelling of it.
 
-### Skipping step 2 for accounts `gh` already knows
+### Logging the CLIs in
 
-If you are already logged in with `gh`, there is nothing to store and nothing to
-paste. Declare where the value lives instead:
+gitwho stores no token. Each account names a `provider` and a `login`, and
+`exec` asks that provider's CLI for the token every time — so "configuring
+credentials" means logging that CLI in as that login, once, and letting it
+manage renewal from there:
 
-```toml
-env = [{ var = "GH_TOKEN", from = "gh", user = "your-username" }]
-```
+- **GitHub:** `gh auth login --hostname github.com`, once per account's
+  `login`. `gh auth status` lists the logins it already holds; `gh auth
+  refresh` and token rotation are picked up on the next call, since gitwho
+  never keeps a copy to go stale.
+- **Gitea or Forgejo:** `tea login add --url <url>`, once per server named by
+  an account's `url`. **Only one login per Gitea server is supported** — `tea
+  login helper get` returns the first login for a host regardless of which one
+  gitwho asks for, so two accounts on one server cannot be told apart, and
+  gitwho refuses rather than guess.
 
-`gh auth status` lists the accounts you can name there. Step 2 disappears for
-each account declared this way, and so does maintaining it: this is a pointer,
-not a copy, so `gh auth refresh` is picked up on the next call rather than
-leaving gitwho holding a token that is present, decryptable and wrong.
+`doctor` reports an account whose login does not answer as a problem, and the
+message names the exact command to fix it: `gh auth login --hostname
+github.com`, or `tea login add --url <url>`.
 
-If **every** variable in your config is declared this way, there is no secret
-store to create either — no `identity.key`, no `secrets.age`, no
-`gitwho secret init`. gitwho opens the store lazily and only complains about a
-missing one when something actually asks it for a value. A config that does need
-it still fails loudly, and names the account and variable that wanted it.
-
-Two things to know before using it everywhere. It costs a process spawn — about
-60 ms against about 10 ms for a stored value — which is why it is declared per
-variable rather than globally. And it only works for credentials another tool
-owns: a token used solely by an MCP server, or a fine-grained PAT scoped more
-narrowly than gh's OAuth token, still belongs in the store. You cannot ask `gh`
-for a token with scopes it does not hold.
-
-If `gh` cannot answer — not installed, or no such account — gitwho fails and
-names the account and variable. It never falls back to a stored value, because
-a stored value that disagrees with the tool is exactly the stale copy this
-avoids.
-
-### Renewing a token later
-
-A token expires, or you revoke one. From inside a repository the account owns:
-
-```sh
-gitwho renew
-```
-
-It resolves the account from the repository's remote, prints it with the reason
-it was chosen, and then handles each of the account's credentials according to
-where the value actually lives.
-
-For a **stored** value on a host `gh` serves, it does not ask you to go and find
-a token. `gh auth status` already reports whether its own token for an account
-works, so gitwho reads that and acts on it:
-
-- gh's token is good, and differs from what is stored → it shows both
-  fingerprints and offers to store gh's. One keypress.
-- gh's token is good and identical → `already current`, and nothing is written.
-- gh reports the token as no longer valid → it runs `gh auth login` for you,
-  with `GH_TOKEN` cleared and the shim skipped, then stores the result. That
-  clearing matters: gh refuses to save credentials while `GH_TOKEN` is set, and
-  gitwho's own shim is what sets it.
-- gh has logins but none named like the account → it lists them and asks which,
-  because the account may be named for the org rather than for the login, and
-  guessing would store somebody else's token.
-- gh knows nothing about the host, or is not installed → the hidden prompt, as
-  before.
-
-Since the account authenticated by `gh auth login` is chosen in the browser
-rather than by gitwho, it re-checks afterwards and refuses to store anything if
-the account you wanted is still not working.
-
-For a value declared `from = "gh"` nothing is stored here at all, because a copy
-would defeat the pointer — it prints the `gh auth login` to run, with the
-fingerprint of what the tool currently holds.
-
-`gitwho renew <VAR>` narrows it to one variable, `--paste` types the value in
-without consulting gh, and `--no-login` stops short of the browser.
-
-`gitwho whoami` answers the same resolution question without touching anything,
-and `gitwho whoami --quiet` prints just the account name for use in another
+`gitwho whoami` answers the resolution question without touching anything, and
+`gitwho whoami --quiet` prints just the account name for use in another
 command — failing rather than answering when nothing identified it, since a
 plausible wrong name is worse than no name.
 
-Both refuse to write against a repository no account claims. The declared
-default would accept the write and look healthy in `doctor` afterwards, which is
-the wrong-and-quiet failure (R8) rather than a convenience.
+The credential helper refuses to write against a repository no account
+claims. The declared default would accept the write and look healthy in
+`doctor` afterwards, which is the wrong-and-quiet failure (R8) rather than a
+convenience.
 
 **`init` is idempotent.** Re-run it after adding an account, or after moving the
 binary. Every step reports `ok` when there was nothing to do, so a second run
@@ -217,30 +167,30 @@ account = "Personal"          # used only when nothing else matches
 gitName = "Your Name"
 
 [[accounts]]
-name          = "Personal"
-provider      = "github"      # required, but see below — nothing reads it yet
-email         = "you@example.com"
-gitCredential = "GH_TOKEN"    # names the variable; the value lives in the store
-sshKey        = "~/.ssh/id_ed25519_personal"
-match         = ["github.com/YourUser/**"]
-paths         = ["~/src/personal/"]           # only for repos with no remote
-env           = ["GH_TOKEN"]                  # what `exec` injects
+name     = "Personal"
+provider = "github"            # "gitea" and "forgejo" (same thing) are the others
+login    = "your-username"     # the gh login; gitwho asks gh for the token
+email    = "you@example.com"
+sshKey   = "~/.ssh/id_ed25519_personal"
+match    = ["github.com/YourUser/**"]
+paths    = ["~/src/personal/"]           # only for repos with no remote
 ```
 
 `match` is what does the real work — it is matched against `host/path`, so
 `github.com/SomeOrg/**` selects an account by *organisation*, which is why
 several GitHub accounts on one host can be told apart. `paths` is only a
-fallback for repositories with no remote. Neither `env` nor `gitCredential`
-ever holds a value; they name variables.
+fallback for repositories with no remote.
 
-`provider` is required by the parser but is currently read by nothing —
-`mcp sync` recognises provider servers from their command, not from this field.
-Write the obvious value (`github`, `gitea` — Forgejo and Codeberg are Gitea
-forks) and do not expect it to change any behaviour.
+`provider` decides which variables `exec` sets: a `github` account gets
+`GH_TOKEN`; a `gitea` account (also required: `url`) gets `GITEA_TOKEN` and
+`GITEA_INSTANCE_URL`. `login` is required on every account — it is the login
+`gh`/`tea` holds the token under, not the git author identity. See
+[docs/accounts.toml.example](accounts.toml.example) for every field, including
+the self-hosted Gitea example.
 
-**Check the tokens are alive before you trust them.** A stored-but-dead token
-looks identical to a working one here; `doctor` cannot yet tell them apart. For
-GitHub, without printing the value:
+**Check the tokens are alive before you trust them.** A token the server has
+revoked still looks healthy to `doctor`, because telling them apart needs the
+network. For GitHub, without printing the value:
 
 ```sh
 curl -sI -H "Authorization: Bearer $TOKEN" https://api.github.com/user \
@@ -464,6 +414,5 @@ is the cost of the store never being in a repo.
   `gitwho exec --account <name>`, and add the remote before the first commit.
   The README's [Starting a new repository](../README.md#starting-a-new-repository)
   has the `gh` and `tea` versions.
-- **`tea` reads `GITEA_INSTANCE_URL`, not `GITEA_HOST`.** With the wrong name
-  it quietly uses whichever login is stored in its own config instead of the
-  account gitwho resolved.
+- **Two accounts on one Gitea server are refused.** tea cannot be told which
+  login to use, so gitwho will not guess.

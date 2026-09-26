@@ -28,18 +28,9 @@ const ACCOUNTS = [
 ];
 
 /*
- * Exactly the variables the three accounts above declare, and nothing else.
- *
- * gitwho clears the *union of the declared names* (`managed_variables` in
- * ../src/exec.rs) — not every credential-looking variable in the environment.
- * A variable no account names is inherited like any other, so listing one here
- * would claim a general scrub the tool does not perform.
- *
- * Both GitHub accounts name GH_TOKEN, which is why three accounts yield three
- * rows rather than six: the set is of names. GITEA_INSTANCE_URL is the gitea
- * account's second declaration — `tea` needs its URL as well as its token —
- * and it is cleared on the same rule as the token, being declared rather than
- * being secret.
+ * What `exec` clears is a fixed set (`always_cleared` in ../src/provider.rs),
+ * not whatever the config names; three of its rows are enough to show one set
+ * and the rest cleared.
  */
 const ENV = [
   { name: 'GH_TOKEN', state: 'set', kept: true },
@@ -169,10 +160,9 @@ const ROWS3 = [48, 70, 92];
       <title id="flow-process-title">One process, one token</title>
       <desc id="flow-process-desc">
         gitwho runs the command with exactly one account's credentials. GH_TOKEN is set for this one
-        process, from the account that matched. GITEA_TOKEN and GITEA_INSTANCE_URL — the variables the gitea
-        account declares — are cleared before the process starts, shown struck through. What gets
-        cleared is every variable named by any account in this config, so adding an account protects
-        every other account from it. The token is present in one process for one invocation instead
+        process, from the account that matched. GITEA_TOKEN and GITEA_INSTANCE_URL are cleared before
+        the process starts, shown struck through. What gets cleared is every variable any supported
+        tool reads. The token is present in one process for one invocation instead
         of in every process for the whole session, so nothing is left for an unrelated process to
         inherit.
       </desc>

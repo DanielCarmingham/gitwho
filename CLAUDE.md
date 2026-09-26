@@ -13,7 +13,7 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, secret storage, `exec` + shims, `doctor`, `sync`
-and MCP wrapping all route real traffic. 246 tests, clippy clean.
+and MCP wrapping all route real traffic. 231 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
 suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
@@ -128,12 +128,9 @@ Providers differ in **mechanism**, not just variable name:
 - Each CLI reads its own variables: `gh`→`GH_TOKEN`, `tea`→`GITEA_TOKEN` +
   `GITEA_INSTANCE_URL`, `glab`→`GITLAB_TOKEN`, `az devops`→its own.
 
-The declaration schema is in
-[docs/accounts.toml.example](docs/accounts.toml.example). `env` and
-`gitCredential` name variables, never values. A value lives in the store, or —
-for `{ var = "…", from = "gh", user = "…" }` entries — stays in the tool that
-already holds it and is read on demand. A referenced variable needs no stored
-value, so a config with only referenced variables needs no secret store at all.
+The schema is in docs/accounts.toml.example. An account names its `provider`,
+its CLI `login` and (gitea) `url`; `src/provider.rs` decides which variables
+that means. Tokens are read from `gh`/`tea` on demand.
 
 ## Verified environment
 
@@ -208,7 +205,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 257 pass, 1 ignored
+cargo test                              # 231 pass, 1 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```
