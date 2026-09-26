@@ -45,6 +45,13 @@ pub trait Runner {
     ) -> std::io::Result<Option<Captured>>;
 }
 
+/// Set in the environment of every command [`ProcessRunner`] starts.
+///
+/// A shim gitwho does not know to skip -- one installed with `--dir`, or a
+/// user's own wrapper -- routes a token fetch back into `gitwho exec`, which
+/// sees this and runs the command without fetching another token.
+pub const FETCHING_TOKEN: &str = "GITWHO_FETCHING_TOKEN";
+
 /// Runs commands for real, resolving them past gitwho's own shims.
 ///
 /// That last part is not a refinement, it is the difference between working and
@@ -181,6 +188,7 @@ impl ProcessRunner {
         for name in &self.clearing {
             command.env_remove(name);
         }
+        command.env(FETCHING_TOKEN, "1");
         command
             .args(args)
             .stdin(if input.is_some() {
@@ -319,7 +327,7 @@ pub struct TokenOwner<'a> {
 /// what to run; none ever contains a token.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenError {
-    #[error("{account}: {program} is not installed, and it holds this account's token")]
+    #[error("{account}: {program} is not installed, and it holds this account's token; install {program}")]
     NotInstalled { account: String, program: String },
     #[error("{account}: {program} failed: {detail}")]
     Failed {
@@ -333,7 +341,7 @@ pub enum TokenError {
         login: String,
         detail: String,
     },
-    #[error("{account}: {program} returned an empty token for login {login}")]
+    #[error("{account}: {program} returned an empty token for login {login}; log {program} in again as {login}")]
     Empty {
         account: String,
         program: String,
@@ -341,19 +349,31 @@ pub enum TokenError {
     },
     #[error("{account}: a gitea account needs `url`, the server's https address")]
     NoUrl { account: String },
-    #[error("{account}: `tea login ls -o json` did not return a login list: {detail}")]
+    #[error(
+        "{account}: `tea login ls -o json` did not return a login list: {detail}; \
+         check that `tea login ls -o json` works"
+    )]
     TeaList { account: String, detail: String },
     #[error("{account}: tea has no login for {url}; run `tea login add --url {url}`")]
     NoTeaLogin { account: String, url: String },
     #[error(
-        "{account}: tea has {count} logins for {url} ({names}) and cannot be told which to use, \
-         so gitwho will not guess; keep one with `tea login delete`"
+        "{account}: tea has {count} logins on host {host} ({names}), and its helper picks one by \
+         host alone, so gitwho will not guess; keep one with `tea login delete`"
     )]
     AmbiguousTeaLogin {
         account: String,
-        url: String,
+        host: String,
         count: usize,
         names: String,
+    },
+    #[error(
+        "{account}: tea's login on this host is for {found}, a different address on the same host \
+         from url = \"{url}\"; fix whichever is wrong"
+    )]
+    TeaLoginElsewhere {
+        account: String,
+        url: String,
+        found: String,
     },
     #[error(
         "{account}: tea's login for {url} is user {found}, but accounts.toml says login = \"{login}\"; \
@@ -365,7 +385,9 @@ pub enum TokenError {
         found: String,
         login: String,
     },
-    #[error("{account}: tea has no token for {url}: {detail}")]
+    #[error(
+        "{account}: tea has no token for {url}: {detail}; run `tea login add --url {url}` again"
+    )]
     NoTeaToken {
         account: String,
         url: String,
@@ -442,8 +464,9 @@ struct TeaLogin {
 }
 
 /// tea's helper answers with the *first* login for a host whatever user is
-/// asked for (tea 0.15.1), so it is only asked once the listing proves there
-/// is exactly one candidate and it is the right user.
+/// asked for (tea 0.15.1), and a host is all it is given -- not the scheme, not
+/// the path. So it is only asked once the listing proves there is exactly one
+/// login on that host, at the account's own address, for the right user.
 fn tea_token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenError> {
     let account = owner.account.to_string();
     let url = owner.url.ok_or_else(|| TokenError::NoUrl {
@@ -463,27 +486,20 @@ fn tea_token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenErr
             detail: e.to_string(),
         })?;
 
-    let matching: Vec<&TeaLogin> = logins.iter().filter(|l| same_url(&l.url, url)).collect();
-    match matching.as_slice() {
+    let host = host_of(url);
+    let candidates: Vec<&TeaLogin> = logins.iter().filter(|l| host_of(&l.url) == host).collect();
+    let only = match candidates.as_slice() {
         [] => {
             return Err(TokenError::NoTeaLogin {
                 account,
                 url: url.to_string(),
             })
         }
-        [only] if only.user == owner.login => {}
-        [only] => {
-            return Err(TokenError::WrongTeaLogin {
-                account,
-                url: url.to_string(),
-                found: only.user.clone(),
-                login: owner.login.to_string(),
-            })
-        }
+        [only] => *only,
         many => {
             return Err(TokenError::AmbiguousTeaLogin {
                 account,
-                url: url.to_string(),
+                host,
                 count: many.len(),
                 names: many
                     .iter()
@@ -492,9 +508,24 @@ fn tea_token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenErr
                     .join(", "),
             })
         }
+    };
+    if !same_url(&only.url, url) {
+        return Err(TokenError::TeaLoginElsewhere {
+            account,
+            url: url.to_string(),
+            found: only.url.clone(),
+        });
+    }
+    if only.user != owner.login {
+        return Err(TokenError::WrongTeaLogin {
+            account,
+            url: url.to_string(),
+            found: only.user.clone(),
+            login: owner.login.to_string(),
+        });
     }
 
-    let request = format!("protocol=https\nhost={}\n\n", host_of(url));
+    let request = format!("protocol=https\nhost={host}\n\n");
     let answer = invoke(
         runner,
         owner,
@@ -534,10 +565,11 @@ fn same_url(a: &str, b: &str) -> bool {
         .eq_ignore_ascii_case(b.trim_end_matches('/'))
 }
 
-/// The `host[:port]` git's credential protocol names a server by.
-fn host_of(url: &str) -> &str {
+/// The `host[:port]` git's credential protocol names a server by, lowercased
+/// because host names are case-insensitive.
+fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    rest.split('/').next().unwrap_or(rest)
+    rest.split('/').next().unwrap_or(rest).to_ascii_lowercase()
 }
 
 /// A short, stable identifier for a value that reveals nothing about it.

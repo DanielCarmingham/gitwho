@@ -411,6 +411,8 @@ Per account, in `accounts.toml`:
    other value.
 3. Add `login`: the `gh` login, or the user your `tea` login for that server
    holds, that this account's token already lives under.
+   `gitwho init --discover <root>` prints a proposed config that lists the
+   logins gh and tea hold, which helps if you are unsure of the names.
 4. For a `gitea` account, add `url`: the server's https address. Required for
    `gitea`, rejected for `github`, which always means github.com.
 
@@ -429,6 +431,23 @@ itself:
 ```sh
 rm ~/.config/gitwho/secrets.age ~/.config/gitwho/identity.key
 ```
+
+If you had pointed `GITWHO_SECRETS` or `GITWHO_IDENTITY` elsewhere, delete the
+files at those paths as well.
+
+If you used the keychain backend (`secretBackend = "keychain"`, or
+`GITWHO_SECRET_BACKEND=keychain`), your tokens are still in the platform's
+credential store, filed under the service name `gitwho`, and 0.3 never reads or
+removes them. Delete `secretBackend` from `[defaults]`, then remove the entries.
+On macOS, `security delete-generic-password` removes one entry per run, so
+repeat it until it reports that the item could not be found:
+
+```sh
+security delete-generic-password -s gitwho
+```
+
+On Linux and Windows, remove the equivalent entries for service `gitwho` in
+Secret Service or Credential Manager.
 
 ## Things that will bite you
 
@@ -450,5 +469,7 @@ rm ~/.config/gitwho/secrets.age ~/.config/gitwho/identity.key
   `gitwho exec --account <name>`, and add the remote before the first commit.
   The README's [Starting a new repository](../README.md#starting-a-new-repository)
   has the `gh` and `tea` versions.
-- **Two accounts on one Gitea server are refused.** tea cannot be told which
-  login to use, so gitwho will not guess.
+- **Two tea logins on one host are refused.** tea's helper is asked by host
+  alone and cannot be told which login to use, so gitwho will not guess. That
+  includes two servers under different paths on one host, and an `http` and an
+  `https` login for the same host.

@@ -716,14 +716,18 @@ fn whoami(quiet: bool) -> Result<ExitCode, String> {
 }
 
 fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, String> {
-    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
-
     let (program, args) = command.split_first().expect("clap requires a command");
 
-    // Checked before anything else, and before an account is resolved at all.
-    // A command that establishes a credential is how an account with nothing
-    // stored gets one, so failing it for the missing secret would close the
-    // only door out of that state.
+    // Re-entered from our own token fetch through a shim we did not skip:
+    // fetching a token here would re-enter again, without end.
+    if std::env::var_os(gitwho::sources::FETCHING_TOKEN).is_some() {
+        return run_with(program, args, &plan_cleared());
+    }
+
+    // Checked before the config is even read. A login command is how someone
+    // with no login yet gets one, and how someone who has not converted a 0.2
+    // accounts.toml can still reach gh and tea; failing it on either would
+    // close the only door out of that state.
     if gitwho::shim::establishes_credentials(program, args) {
         eprintln!(
             "gitwho: {} establishes credentials, so no token was injected",
@@ -735,6 +739,7 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
         return run_with(program, args, &plan_cleared());
     }
 
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
 
     let account = match account_name {
@@ -888,7 +893,8 @@ fn config_path() -> Result<PathBuf, String> {
 /// `gitwho exec -- /real/gh`, so resolving `gh` normally from inside the
 /// credential helper re-enters gitwho and loops. Skipping the directory is what
 /// makes reading a token from `gh` safe on a machine where shims are installed
-/// -- which is every machine gitwho has finished setting up.
+/// -- which is every machine gitwho has finished setting up. A shim anywhere
+/// else is caught by [`gitwho::sources::FETCHING_TOKEN`] instead.
 fn runner() -> ProcessRunner {
     match default_shim_dir() {
         Ok(dir) => ProcessRunner::skipping(vec![dir]),

@@ -178,3 +178,54 @@ fn a_forgejo_account_parses_as_gitea() {
         Some("https://git.example.net")
     );
 }
+
+#[test]
+fn a_gitea_url_without_an_http_scheme_is_rejected() {
+    for url in [
+        "git.example.net",
+        "ssh://git.example.net",
+        "ftp://git.example.net",
+    ] {
+        let message = parse_err(&format!(
+            "{HEAD}provider = \"gitea\"\nlogin = \"a\"\nurl = \"{url}\"\n"
+        ));
+        assert!(
+            message.contains("account A") && message.contains("https://"),
+            "{url}: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_gitea_url_over_http_or_https_is_accepted() {
+    for url in ["https://git.example.net", "http://git.example.net:3000"] {
+        Config::parse(&format!(
+            "{HEAD}provider = \"gitea\"\nlogin = \"a\"\nurl = \"{url}\"\n"
+        ))
+        .unwrap_or_else(|e| panic!("{url}: {e}"));
+    }
+}
+
+#[test]
+fn a_removed_field_points_at_the_upgrade_instructions() {
+    let message = parse_err(&format!(
+        "{HEAD}provider = \"github\"\nlogin = \"a\"\ngitCredential = \"GH_TOKEN\"\n"
+    ));
+    assert!(
+        message.contains(
+            "https://github.com/DanielCarmingham/gitwho/blob/main/docs/INSTALL.md#upgrading-from-02"
+        ),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_leftover_secret_backend_says_to_remove_the_keychain_entries_too() {
+    let message = parse_err(
+        "[defaults]\naccount = \"A\"\nsecretBackend = \"keychain\"\n\n[[accounts]]\nname = \"A\"\nprovider = \"github\"\nlogin = \"a\"\nemail = \"a@example.com\"\n",
+    );
+    assert!(
+        message.contains("keychain") && message.contains("service `gitwho`"),
+        "{message}"
+    );
+}

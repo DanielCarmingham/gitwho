@@ -125,11 +125,11 @@ fn an_ordinary_command_still_gets_the_accounts_credentials() {
     assert!(combined.contains("GH_TOKEN: set"), "{combined}");
 }
 
-/// The bootstrap case: an account declared but never used has nothing stored,
-/// so the ordinary path fails with MissingSecret before the tool ever runs.
-/// Logging in is how you would fix that, so it must not be what is blocked.
+/// The bootstrap case: gh holds no login for a newly declared account, so the
+/// ordinary path fails before the tool ever runs. Logging in is how you would
+/// fix that, so it must not be what is blocked.
 #[test]
-fn an_account_with_nothing_stored_can_still_log_in() {
+fn an_account_gh_has_no_login_for_can_still_log_in() {
     let fixture = Fixture::new();
 
     let output = fixture.run(
@@ -146,7 +146,7 @@ fn an_account_with_nothing_stored_can_still_log_in() {
 }
 
 #[test]
-fn an_account_with_nothing_stored_still_fails_for_an_ordinary_command() {
+fn an_account_gh_has_no_login_for_still_fails_for_an_ordinary_command() {
     let fixture = Fixture::new();
 
     let output = fixture.run(
@@ -173,4 +173,97 @@ fn tea_login_add_is_covered_too() {
 
     assert!(output.status.success(), "{combined}");
     assert!(combined.contains("GH_TOKEN: unset"), "{combined}");
+}
+
+/// Kill `child` and everything it started, which in the looping case is a
+/// chain of `gitwho exec` processes each waiting on the next.
+#[cfg(unix)]
+fn wait_or_kill_group(
+    mut child: std::process::Child,
+    limit: std::time::Duration,
+) -> Option<std::process::Output> {
+    let started = std::time::Instant::now();
+    while started.elapsed() < limit {
+        if child.try_wait().unwrap().is_some() {
+            return Some(child.wait_with_output().unwrap());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    Command::new("kill")
+        .args(["-KILL", &format!("-{}", child.id())])
+        .status()
+        .unwrap();
+    let _ = child.wait();
+    None
+}
+
+/// A shim outside the default directory is not skipped when a token is
+/// fetched, so without a guard `gh auth token` re-enters `gitwho exec`, which
+/// fetches a token, which runs `gh auth token`, without end.
+#[cfg(unix)]
+#[test]
+fn a_shim_in_a_non_default_directory_does_not_loop_a_token_fetch() {
+    use std::os::unix::process::CommandExt;
+
+    let fixture = Fixture::new();
+    let shims = fixture.dir.path().join("customshims");
+    let home = fixture.dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let installed = fixture
+        .command(
+            &["shim", "install", "--dir", shims.to_str().unwrap(), "gh"],
+            None,
+        )
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{}", out(&installed));
+
+    let child = fixture
+        .command(&["exec", "--", "gh", "api", "user"], None)
+        .env("HOME", &home)
+        .env(
+            "PATH",
+            format!("{}:{}", shims.display(), fixture.fakes.path()),
+        )
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+
+    let output = wait_or_kill_group(child, std::time::Duration::from_secs(20))
+        .expect("gitwho exec was still running after 20s: the token fetch re-entered the shim");
+    let combined = out(&output);
+    assert!(output.status.success(), "{combined}");
+    assert!(combined.contains("GH_TOKEN: set"), "{combined}");
+}
+
+/// Upgrading from 0.2 leaves `gitCredential` in accounts.toml until it is
+/// converted, and logging in must still work in the meantime.
+#[test]
+fn a_login_command_runs_even_when_accounts_toml_has_a_removed_field() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.dir.path().join("accounts.toml"),
+        r#"
+        [defaults]
+        account = "Personal"
+
+        [[accounts]]
+        name = "Personal"
+        provider = "github"
+        login = "personal"
+        email = "me@example.com"
+        gitCredential = "GH_TOKEN"
+        "#,
+    )
+    .unwrap();
+
+    let output = fixture.run(&["exec", "--", "gh", "auth", "login"], None);
+    let combined = out(&output);
+
+    assert!(output.status.success(), "{combined}");
+    assert!(combined.contains("args: auth login"), "{combined}");
 }

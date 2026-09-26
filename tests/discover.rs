@@ -537,3 +537,14 @@ fn an_unsupported_provider_is_proposed_commented_out() {
     );
     assert!(!text.contains("\n[[accounts]]\nname = \"acme\""), "{text}");
 }
+
+#[test]
+fn an_org_left_out_as_unsupported_is_not_counted_as_proposed() {
+    let mut scan = scan_of("github.com", "acme-corp", 3);
+    scan.orgs.extend(scan_of("gitlab.com", "acme", 3).orgs);
+    let text = render(&scan, &[], &Default::default(), &[]);
+    assert!(
+        text.contains("in 2 organisation(s); 1 proposed as accounts."),
+        "{text}"
+    );
+}

@@ -156,10 +156,8 @@ fn check_permissions(store: &Store, findings: &mut Vec<Finding>) {
         // residual gap this does not close.
         let meta = match std::fs::metadata(path) {
             Ok(meta) => meta,
-            // Nothing there yet. A fresh install has no secrets.age until the
-            // first `secret set`, and a missing identity is already reported
-            // loudly by the secrets check -- saying it twice would make a
-            // clean install look broken.
+            // Nothing there yet. A missing accounts.toml has already failed
+            // loudly on load, so saying it twice would add nothing.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
                 clean = false;
@@ -209,7 +207,7 @@ fn check_permissions(store: &Store, findings: &mut Vec<Finding>) {
         }
     }
 
-    // Said out loud when it passes, the way stored secrets are, so the check
+    // Said out loud when it passes, the way a working token is, so the check
     // is visible rather than only noticeable when it fails.
     if clean {
         findings.push(Finding::new(

@@ -13,7 +13,7 @@ each one rests on. [README.md](README.md) is the short version;
 
 **Built, tested, and in use** on the author's machine since 2026-08-10 —
 resolver, credential helper, CLI-sourced tokens, `exec` + shims, `doctor`,
-`sync` and MCP wrapping all route real traffic. 204 tests, clippy clean.
+`sync` and MCP wrapping all route real traffic. 215 tests, clippy clean.
 
 **macOS is where it runs daily. Linux is now exercised, not assumed:** the full
 suite (138 tests as it stood then) plus the whole `init` flow — `0700`/`0600`
@@ -25,11 +25,14 @@ rust:1.88-bookworm`, copying the tree in rather than building in the mount.
 x86-64 Linux is still only covered by CI.
 
 **Windows is unverified in the strong sense.** `%APPDATA%\gitwho` in
-`src/paths.rs`, the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs`, and the
-fact that gitwho applies no ACLs there (`Protection::DirectoryInherited`, so
-`doctor` warns rather than the file being closed down). All are unit-tested as
-pure functions from macOS; none has ever run on Windows. **Do not describe them
-as working.**
+`src/paths.rs` and the `.cmd` shim and `PATHEXT` lookup in `src/shim.rs` are
+unit-tested as pure functions from macOS; none has ever run on Windows. gitwho
+neither applies nor checks ACLs there: `doctor`'s permission check is
+unix-only and does nothing on Windows. **Do not describe any of it as working.**
+
+Known gap, not implemented: `sources::ProcessRunner::resolve_in` looks for the
+bare name with no `PATHEXT`/`.exe` lookup, so on Windows a token fetch would
+find no `gh.exe` or `tea.exe` and report the CLI as not installed.
 
 The mechanism that makes that testable is a **parameter, never a `cfg!`**:
 `paths::Layout` and `shim::ShimTarget` are arguments, with `HOST` used only by
@@ -55,9 +58,9 @@ still *builds* elsewhere.
 - **No global mutable credential state** (R9). No `gh auth switch`-style
   process-wide active account. Per-process / per-invocation only.
 - **Resolution is on the hot path** (R15). It runs on every CLI invocation and
-  every git transport operation; budget is single-digit-to-low-double-digit
-  milliseconds, measured against `gh`'s and `tea`'s own costs (`gh` ~60 ms one
-  process spawn; `tea`'s pair ~14 ms + ~17 ms median).
+  every git transport operation; gitwho's own share is held to
+  single-digit-to-low-double-digit milliseconds. The token fetch on top costs
+  `gh` ~60 ms (one spawn) or `tea` ~14 ms + ~17 ms median (two spawns).
 - **Nothing personal in the repo.** Fixtures and examples use `example.com`,
   `acme-*` and placeholder account names. Real accounts, orgs, emails and
   hostnames belong in `~/.config/gitwho/accounts.toml`, never here.
@@ -205,7 +208,7 @@ Choices worth not re-litigating:
 ## Checks before calling anything done
 
 ```sh
-cargo test                              # 204 pass, 0 ignored
+cargo test                              # 215 pass, 0 ignored
 cargo clippy --all-targets -- -D warnings
 gitwho doctor                           # read-only; exits non-zero on problems
 ```

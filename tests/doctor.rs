@@ -568,9 +568,8 @@ fn a_store_owned_by_someone_else_is_a_problem() {
 
 /// A runner with no answers at all.
 ///
-/// Most of these configs reference no external tool, so consulting it would be
-/// a bug -- an empty map turns that into a visible failure rather than a silent
-/// success.
+/// For tests about something other than tokens: every token check it answers
+/// fails loudly with "no reply", so a token cannot quietly appear to be fine.
 fn no_sources() -> MapRunner {
     MapRunner::new(HashMap::new())
 }

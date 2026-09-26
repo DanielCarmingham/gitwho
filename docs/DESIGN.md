@@ -395,11 +395,13 @@ throughout the source.
   dotfiles repo plus re-entered tokens. Anything that cannot be committed is
   documented as a manual step rather than discovered.
 - **R15 — Cheap.** Resolution runs on every CLI invocation and every git
-  transport operation. The budget is single-digit-to-low-double-digit
-  milliseconds, measured against the token sources themselves: `gh auth token`
-  costs one process spawn, about 60 ms; `tea login ls -o json` plus
-  `tea login helper get` measured 14 ms and 17 ms median respectively, against
-  plaintext fake logins.
+  transport operation. gitwho's own share — parsing `accounts.toml` and
+  matching remotes — is held to single-digit-to-low-double-digit milliseconds.
+  There are no stored values to read any more. The real cost is the token
+  fetch on top of that, paid on every https git operation and every `exec`:
+  one `gh auth token` spawn, about 60 ms (gh 2.97.0), or two tea spawns,
+  `tea login ls -o json` and `tea login helper get`, at 14 ms and 17 ms median
+  (tea 0.15.1, plaintext fake logins).
 
 ---
 
@@ -464,5 +466,11 @@ the second is the one to act on.
 - **A token the server has revoked but the CLI still hands out looks healthy
   to `doctor`**; detecting it needs the network (`doctor --check-remote`,
   planned).
-- **Two accounts on one Gitea server are unsupported** (tea picks the first
-  login per host).
+- **Two tea logins on one host are unsupported** (tea's helper is asked by host
+  alone and picks the first login for it), even when they are different
+  servers under different paths, or `http` and `https`.
+- **`exec` fetches the resolved account's token whatever program it runs.**
+  `gh` in a repository that resolves to a Gitea account asks tea for that
+  account's token first, so it fails if tea is missing or logged in as someone
+  else. That is loud, not wrong: no token is invented and none from another
+  account is used.

@@ -80,6 +80,14 @@ fn tea_replying(ls: Captured, helper: Captured) -> MapRunner {
     ]))
 }
 
+/// The error message, failing without printing the token if one came back.
+fn refusal(runner: &MapRunner, owner: &TokenOwner) -> String {
+    match token(runner, owner) {
+        Ok(_) => panic!("a token was handed over where a refusal was expected"),
+        Err(e) => e.to_string(),
+    }
+}
+
 fn asked_tea_for_a_token(runner: &MapRunner) -> bool {
     runner
         .calls()
@@ -250,4 +258,65 @@ fn a_gitea_owner_without_a_url_is_an_error() {
         .unwrap_err()
         .to_string();
     assert!(message.contains("url"), "{message}");
+}
+
+/// tea's helper is asked by host alone, so a login elsewhere on the same host
+/// is a candidate whatever its path.
+#[test]
+fn two_tea_logins_on_one_host_under_different_paths_are_refused() {
+    let runner = tea_listing(&[
+        ("forge", "https://git.example.net/forgejo", "someone-else"),
+        ("tea", "https://git.example.net/gitea", "you"),
+    ]);
+    let message = refusal(&runner, &gitea("you", "https://git.example.net/gitea"));
+    assert!(
+        message.contains("forge") && message.contains("tea"),
+        "{message}"
+    );
+    assert!(!asked_tea_for_a_token(&runner));
+    assert!(!message.contains(TOKEN));
+}
+
+#[test]
+fn http_and_https_tea_logins_for_one_host_are_refused() {
+    let runner = tea_listing(&[
+        ("plain", "http://git.example.net", "someone-else"),
+        ("secure", "https://git.example.net", "you"),
+    ]);
+    let message = refusal(&runner, &gitea("you", "https://git.example.net"));
+    assert!(
+        message.contains("plain") && message.contains("secure"),
+        "{message}"
+    );
+    assert!(!asked_tea_for_a_token(&runner));
+    assert!(!message.contains(TOKEN));
+}
+
+#[test]
+fn the_only_tea_login_on_the_host_at_another_address_is_refused_naming_both() {
+    let runner = tea_listing(&[("forge", "https://git.example.net/forgejo", "you")]);
+    let message = refusal(&runner, &gitea("you", "https://git.example.net/gitea"));
+    assert!(
+        message.contains("https://git.example.net/forgejo")
+            && message.contains("https://git.example.net/gitea"),
+        "{message}"
+    );
+    assert!(message.contains("same host"), "{message}");
+    assert!(!asked_tea_for_a_token(&runner));
+    assert!(!message.contains(TOKEN));
+}
+
+#[test]
+fn the_helper_is_asked_for_the_host_in_lowercase() {
+    let runner = tea_listing(&[("acme", "https://git.example.net", "you")]);
+    token(&runner, &gitea("you", "https://Git.Example.NET")).unwrap();
+    let helper_input = runner
+        .calls()
+        .into_iter()
+        .find(|(key, _)| key == "tea login helper get")
+        .and_then(|(_, input)| input);
+    assert_eq!(
+        helper_input.as_deref(),
+        Some("protocol=https\nhost=git.example.net\n\n")
+    );
 }

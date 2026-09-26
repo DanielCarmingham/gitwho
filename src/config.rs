@@ -18,7 +18,10 @@ pub enum ConfigError {
         #[source]
         source: std::io::Error,
     },
-    #[error("{place} uses `{field}`, which gitwho no longer reads: {instead}. See docs/accounts.toml.example")]
+    #[error(
+        "{place} uses `{field}`, which gitwho no longer reads: {instead}. See \
+         https://github.com/DanielCarmingham/gitwho/blob/main/docs/INSTALL.md#upgrading-from-02"
+    )]
     Removed {
         place: String,
         field: &'static str,
@@ -90,7 +93,8 @@ const REMOVED_FROM_ACCOUNTS: &[(&str, &str)] = &[
 
 const REMOVED_FROM_DEFAULTS: &[(&str, &str)] = &[(
     "secretBackend",
-    "gitwho stores no secrets any more; delete it",
+    "gitwho stores no secrets any more; delete it, and remove any entries gitwho left in your \
+     keychain under service `gitwho`",
 )];
 
 impl Account {
@@ -139,6 +143,11 @@ impl Config {
             let problem = match (account.provider, &account.url) {
                 (Provider::Gitea, None) => {
                     "a gitea account needs `url`, the server's https address"
+                }
+                (Provider::Gitea, Some(url))
+                    if !url.starts_with("https://") && !url.starts_with("http://") =>
+                {
+                    "a gitea `url` must start with https:// or http://"
                 }
                 (Provider::Github, Some(_)) => "github means github.com, so `url` is not allowed",
                 _ => continue,
