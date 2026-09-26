@@ -755,8 +755,10 @@ fn whoami(quiet: bool) -> Result<ExitCode, String> {
             println!(
                 "{} decides the identity: every claiming account's rule applies, and it is\n\
                  declared last in accounts.toml -- not because it owns origin. Credentials\n\
-                 are unaffected, as the table above shows.",
-                winner.name
+                 are unaffected, as the table above shows. To have another account decide,\n\
+                 move its [[accounts]] block below {}'s and run `gitwho sync --write`;\n\
+                 the order applies to every repository these accounts share.",
+                winner.name, winner.name
             );
         }
     }

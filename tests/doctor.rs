@@ -622,6 +622,17 @@ fn remotes_owned_by_two_accounts_are_reported_with_the_one_that_wins() {
         "the winning account must be named as the one that decides: {}",
         finding.message
     );
+    // The fix is the global order gitwho already owns, not a per-repo pin.
+    assert!(
+        finding.message.contains("[[accounts]]") && finding.message.contains("gitwho sync --write"),
+        "the finding must say how to change which account decides: {}",
+        finding.message
+    );
+    assert!(
+        !finding.message.contains("include.path"),
+        "per-repository pinning is not the recommended fix: {}",
+        finding.message
+    );
 }
 
 #[test]

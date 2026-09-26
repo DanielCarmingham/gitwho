@@ -441,25 +441,34 @@ the second is the one to act on.
   Covering it properly means generating that jj config from `accounts.toml` the
   way `sync` generates the gitconfig. Nothing here does that yet.
 
-- **A repo whose remotes span two accounts takes the wrong identity.**
-  Measured 2026-08-22 with git 2.54.0 (Apple Git-157). Credentials are fine:
-  the helper is asked per URL at transport time, so a github `origin` and a
-  gitea `upstream` each authenticate as their own account. Identity is not.
-  `sync` emits one `includeIf "hasconfig:remote.*.url:"` per account, and that
-  keyword matches when **any** remote matches — so both rules apply and git's
-  last-include-wins hands `user.email` and `core.sshcommand` to whichever
-  account `accounts.toml` declares last. Not to `origin`.
+- **A repo whose remotes span two of your accounts takes the identity of the
+  one declared later in `accounts.toml`.** That is the rule, stated rather
+  than hidden. Forks are unaffected: an `upstream` owned by someone else is
+  claimed by no account, so only `origin`'s rule applies.
+  Measured 2026-08-22 and again 2026-09-26 with git 2.54.0 (Apple Git-157).
+  Credentials are fine: the helper is asked per URL at transport time, so a
+  github `origin` and a gitea `upstream` each authenticate as their own
+  account. Identity is chosen once per repo: `sync` emits one `includeIf
+  "hasconfig:remote.*.url:"` per account, in declaration order, and that
+  keyword matches when **any** remote matches — so every claiming account's
+  rule applies and git's last-include-wins hands `user.email` and
+  `core.sshcommand` to the account declared last.
 
-  It cannot be fixed in the generated rules: `hasconfig:remote.origin.url:` is
-  not a supported keyword, and a rule using it silently never matches while the
-  same pattern under `remote.*.url` does. Both halves were measured on one
-  fixture repo with only the rule text changed.
+  Following `origin` instead was considered and rejected on 2026-09-26. The
+  generated rules cannot express it: `hasconfig:remote.origin.url:` is not a
+  supported keyword and silently never matches, while the same pattern under
+  `remote.*.url` does. The two ways around that — writing a local
+  `include.path` into each such repo, or giving the second remote an
+  `insteadOf` alias the rules cannot see — add per-repository state or
+  cleverness this project has so far done without. Declaration order is
+  global, deterministic and already how it behaves.
 
-  So `doctor` reports it instead — a `warn`, because a repo that genuinely
-  spans two accounts has no single right answer and only the person who set it
-  up knows which should sign the commits. The finding names both accounts, says
-  which one wins and why, and stops once the repo pins its own identity with a
-  local `user.email` or `include.path`, which beats every included global rule.
+  So it is controlled in one place: move the `[[accounts]]` block that should
+  decide below the other and run `gitwho sync --write`. `whoami` and `doctor`
+  name the deciding account in such a repo and say exactly that. A repo that
+  already pins its own identity locally (`user.email` or `include.path`) is
+  still respected, since local config beats every included global rule, but
+  gitwho never writes one.
 
 - **A GUI application launched outside a shell** — an editor started from the
   Dock — inherits no shim `PATH` and no environment. Git identity and git

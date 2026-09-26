@@ -440,9 +440,10 @@ fn check_repo_identity(config: &Config, git: &GitWiring, findings: &mut Vec<Find
         format!(
             "this repo's remotes belong to {} accounts ({}); every matching account's \
              identity rule applies and {} decides because it is declared last in \
-             accounts.toml -- not because it is origin. Pin the one you want with \
-             `git config --local include.path <gitwho's git dir>/{}.gitconfig`. \
-             Credentials are unaffected: each remote authenticates as its own account.",
+             accounts.toml -- not because it is origin. To have another account decide, \
+             move its [[accounts]] block below {}'s and run `gitwho sync --write`; the \
+             order applies to every repo these accounts share. Credentials are \
+             unaffected: each remote authenticates as its own account.",
             accounts.len(),
             pairs.join(", "),
             winner.name,

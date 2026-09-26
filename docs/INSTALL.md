@@ -471,6 +471,11 @@ Secret Service or Credential Manager.
   that account, sets `origin` and pushes, and refuses if a commit carries
   another author. See the README's
   [Starting a new repository](../README.md#starting-a-new-repository).
+- **A repository whose remotes belong to two of your accounts** takes the
+  identity of the account declared later in `accounts.toml`; credentials are
+  unaffected. Reorder the `[[accounts]]` blocks and run `gitwho sync --write`
+  to change it. See the README's
+  [Remotes from two of your accounts](../README.md#remotes-from-two-of-your-accounts).
 - **Two tea logins on one host are refused.** tea's helper is asked by host
   alone and cannot be told which login to use, so gitwho will not guess. That
   includes two servers under different paths on one host, and an `http` and an

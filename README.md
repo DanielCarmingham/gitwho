@@ -150,6 +150,20 @@ If the push fails after the repository was created, gitwho leaves it in place
 and prints the command to finish. Once `origin` exists, nothing needs naming
 again — every later `gh`, `tea`, push and commit resolves from it.
 
+## Remotes from two of your accounts
+
+A repository can have any number of remotes. A fork's `upstream` belongs to
+someone else, matches none of your accounts, and changes nothing.
+
+When remotes in one repository belong to **two of your own accounts** — a
+fork of your employer's repo into your personal account, or a mirror on a
+self-hosted server — each still authenticates as its own account, but commits
+can carry only one identity. gitwho uses the account **declared later in
+`accounts.toml`**. To change which one decides, move its `[[accounts]]` block
+below the other and run `gitwho sync --write`; the order applies to every
+repository those accounts share. `gitwho whoami` in such a repository names
+the account that decides.
+
 ## Commands
 
 ```

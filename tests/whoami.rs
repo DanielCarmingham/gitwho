@@ -199,6 +199,10 @@ fn two_remotes_owned_by_two_accounts_name_the_one_that_actually_decides() {
         stdout.contains("declared last") || stdout.contains("decides"),
         "did not say which account decides identity:\n{stdout}"
     );
+    assert!(
+        stdout.contains("[[accounts]]") && stdout.contains("gitwho sync --write"),
+        "did not say how to change which account decides:\n{stdout}"
+    );
 }
 
 /// The whole bug in one assertion: the email printed must be the one git will
