@@ -477,7 +477,7 @@ pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins, tea: &[(String, S
             summarise(&org.repos)
         ));
 
-        let url = format!("https://{}", org.host);
+        let mut url = format!("https://{}", org.host);
         let held: Vec<&str> = if provider == "github" {
             logins
                 .by_host
@@ -485,12 +485,24 @@ pub fn render(scan: &Scan, roots: &[PathBuf], logins: &Logins, tea: &[(String, S
                 .map(|names| names.iter().map(String::as_str).collect())
                 .unwrap_or_default()
         } else {
-            tea.iter()
-                .filter(|(u, _)| u.trim_end_matches('/').eq_ignore_ascii_case(&url))
-                .map(|(_, user)| user.as_str())
-                .collect()
+            // By host, as the token fetch selects tea's login: tea answers per
+            // host, so a login under a sub-path is still this server's.
+            let on_host: Vec<&(String, String)> = tea
+                .iter()
+                .filter(|(u, _)| crate::sources::host_of(u) == crate::sources::host_of(&url))
+                .collect();
+            if let [(only, _)] = on_host.as_slice() {
+                url = only.trim_end_matches('/').to_string();
+            }
+            on_host.iter().map(|(_, user)| user.as_str()).collect()
         };
-        if !held.is_empty() {
+        if held.len() > 1 && provider == "gitea" {
+            out.push_str(&format!(
+                "# tea holds: {}. gitwho supports one tea login per server, because tea\n\
+                 # cannot be told which to use; keep one with `tea login delete`.\n",
+                held.join(", ")
+            ));
+        } else if !held.is_empty() {
             let cli = if provider == "github" { "gh" } else { "tea" };
             out.push_str(&format!(
                 "# {cli} holds: {}. Which one owns this org is the one thing discovery\n\

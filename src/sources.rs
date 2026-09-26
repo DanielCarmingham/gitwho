@@ -567,7 +567,7 @@ fn same_url(a: &str, b: &str) -> bool {
 
 /// The `host[:port]` git's credential protocol names a server by, lowercased
 /// because host names are case-insensitive.
-fn host_of(url: &str) -> String {
+pub fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     rest.split('/').next().unwrap_or(rest).to_ascii_lowercase()
 }

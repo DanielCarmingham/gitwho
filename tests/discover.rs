@@ -548,3 +548,38 @@ fn an_org_left_out_as_unsupported_is_not_counted_as_proposed() {
         "{text}"
     );
 }
+
+/// The token fetch selects tea's login by host, so discovery must too: a login
+/// under a sub-path or with different case is still the one for this server,
+/// and its own url is what the guard will compare against.
+#[test]
+fn a_tea_login_is_offered_by_host_and_its_url_proposed() {
+    let scan = scan_of("git.example.net", "acme", 3);
+    let tea = vec![(
+        "https://Git.Example.net/forgejo/".to_string(),
+        "you".to_string(),
+    )];
+    let text = gitwho::discover::render(&scan, &[], &Default::default(), &tea);
+    assert!(text.contains("tea holds: you"), "{text}");
+    assert!(
+        text.contains("url = \"https://Git.Example.net/forgejo\""),
+        "{text}"
+    );
+}
+
+/// tea cannot be told which of two logins on one server to use, and gitwho
+/// refuses rather than guess; the proposal should say so up front.
+#[test]
+fn two_tea_logins_on_one_host_are_flagged_as_unsupported() {
+    let scan = scan_of("git.example.net", "acme", 3);
+    let tea = vec![
+        ("https://git.example.net".to_string(), "alice".to_string()),
+        (
+            "https://git.example.net/other".to_string(),
+            "bob".to_string(),
+        ),
+    ];
+    let text = gitwho::discover::render(&scan, &[], &Default::default(), &tea);
+    assert!(text.contains("alice") && text.contains("bob"), "{text}");
+    assert!(text.contains("one tea login per server"), "{text}");
+}

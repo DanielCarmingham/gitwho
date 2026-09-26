@@ -411,8 +411,9 @@ Per account, in `accounts.toml`:
    other value.
 3. Add `login`: the `gh` login, or the user your `tea` login for that server
    holds, that this account's token already lives under.
-   `gitwho init --discover <root>` prints a proposed config that lists the
-   logins gh and tea hold, which helps if you are unsure of the names.
+   `gitwho init --discover <root>` prints a proposed config that shows,
+   beside each proposed account, the logins gh or tea hold for its host,
+   which helps if you are unsure of the names.
 4. For a `gitea` account, add `url`: the server's https address. Required for
    `gitea`, rejected for `github`, which always means github.com.
 
