@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use gitwho::config::Config;
 use gitwho::credential::{respond, Request};
 use gitwho::exec::{plan_cleared, plan_env};
+use gitwho::publish::Transport;
 use gitwho::resolve::{resolve_repo, Reason};
 use gitwho::sources::ProcessRunner;
 
@@ -18,23 +19,26 @@ Examples:
   Run a command as whichever account this repository resolves to:
     gitwho exec -- gh pr list
 
-  Create a new repository with credentials you already have. A repository
-  with no remote has nothing to match, so it resolves by `paths` or falls
-  back to the default account -- which `gh` will use without complaint.
-  Name the account instead, and add the remote before the first commit so
-  the author identity resolves from it too:
-    git init acme-widget && cd acme-widget
-    gitwho exec --account Work -- \\
-        gh repo create example-corp/acme-widget --private --source=. --remote=origin
-    gitwho whoami                  # now matched by the remote
-    git add . && git commit -m 'Initial commit' && git push -u origin main
+  Run it as a named account, where the directory says nothing -- a repository
+  with no remote yet, or no repository at all:
+    gitwho exec --account Work -- gh repo list example-corp
 
-  The same on Gitea or Forgejo. `tea` creates the repository but adds no
-  remote, so add it yourself. It authenticates as the account's tea login,
-  which exec hands it as GITEA_TOKEN and GITEA_INSTANCE_URL.
-    gitwho exec --account SelfHosted -- \\
-        tea repos create --name acme-widget --private
-    git remote add origin git@ssh.git.example.net:you/acme-widget.git";
+  To create a new repository on the server, set origin and push, use
+  `gitwho publish` instead; see `gitwho publish --help`.";
+
+const PUBLISH_EXAMPLES: &str = "\
+Examples:
+  Publish the repository in this directory as a GitHub account, privately:
+    gitwho publish --account Work
+
+  As a Gitea/Forgejo account, into an organisation, publicly:
+    gitwho publish --account SelfHosted --owner acme --public
+
+  Inside a directory an account claims with `paths`, no flag is needed:
+    cd ~/src/selfhosted/widget && gitwho publish
+
+  If it stops because a commit has the wrong author, it prints the command
+  that fixes it; nothing has been created at that point.";
 
 #[derive(Parser)]
 #[command(
@@ -71,6 +75,34 @@ enum Command {
         /// The command to run, after `--`.
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
+    },
+
+    /// Create this repository on the account's server, set `origin`, and push.
+    ///
+    /// For a repository with commits and no remote yet. The account is the one
+    /// named with --account, or the one whose `paths` claims this directory;
+    /// never the default. Refuses before creating anything if a commit was
+    /// authored by anyone but that account.
+    #[command(after_long_help = PUBLISH_EXAMPLES)]
+    Publish {
+        /// The account to publish as.
+        #[arg(long)]
+        account: Option<String>,
+        /// The repository's name on the server. Defaults to this directory's.
+        #[arg(long)]
+        name: Option<String>,
+        /// Create it in this organisation instead of under your login.
+        #[arg(long)]
+        owner: Option<String>,
+        /// Make it public. Private unless given.
+        #[arg(long)]
+        public: bool,
+        /// Set `origin` to the ssh URL. The default when the account has an sshKey.
+        #[arg(long, conflicts_with = "https")]
+        ssh: bool,
+        /// Set `origin` to the https URL. The default otherwise.
+        #[arg(long)]
+        https: bool,
     },
 
     /// Set up everything on a machine that has never run gitwho.
@@ -234,6 +266,33 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Publish {
+            account,
+            name,
+            owner,
+            public,
+            ssh,
+            https,
+        } => {
+            let requested = match (ssh, https) {
+                (true, _) => Some(Transport::Ssh),
+                (_, true) => Some(Transport::Https),
+                _ => None,
+            };
+            match publish(
+                account.as_deref(),
+                name.as_deref(),
+                owner.as_deref(),
+                public,
+                requested,
+            ) {
+                Ok(code) => code,
+                Err(message) => {
+                    eprintln!("gitwho: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
     }
 }
 
@@ -774,6 +833,150 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
 
     let plan = plan_env(&runner(), account).map_err(|e| e.to_string())?;
     run_with(program, args, &plan)
+}
+
+fn publish(
+    account_name: Option<&str>,
+    name: Option<&str>,
+    owner: Option<&str>,
+    public: bool,
+    requested: Option<Transport>,
+) -> Result<ExitCode, String> {
+    use gitwho::publish::{choose_account, create_args, foreign_authors, parse_created, transport};
+
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let top = git_output(&cwd, &["rev-parse", "--show-toplevel"])
+        .ok_or("this is not inside a git repository")?;
+    if git_output(&cwd, &["rev-parse", "--verify", "-q", "HEAD"]).is_none() {
+        return Err("there are no commits to push yet; commit first".to_string());
+    }
+    let branch = git_output(&cwd, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .ok_or("HEAD is detached; check out the branch to publish")?;
+    if let Some(url) = gitwho::git::origin_url(&cwd) {
+        return Err(format!(
+            "this repository already has an origin ({url}); publish is for one with no remote yet"
+        ));
+    }
+
+    let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
+    let account = choose_account(&config, account_name, &cwd).map_err(|e| e.to_string())?;
+
+    let authors: Vec<String> = git_output(&cwd, &["log", "--format=%ae"])
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect();
+    let foreign = foreign_authors(&account.email, &authors);
+    if !foreign.is_empty() {
+        let author = match account
+            .git_name
+            .as_deref()
+            .or(config.defaults.git_name.as_deref())
+        {
+            Some(git_name) => format!("-c user.name='{git_name}' -c user.email={}", account.email),
+            None => format!("-c user.email={}", account.email),
+        };
+        return Err(format!(
+            "commits here are authored by {} rather than {} ({}); nothing was created.\n\
+             Fix the authors first, then publish again:\n  \
+             last commit only:  git {author} commit --amend --no-edit --reset-author\n  \
+             every commit:      git rebase -r --root --exec \"git {author} commit --amend --no-edit --reset-author\"",
+            foreign.join(", "),
+            account.name,
+            account.email
+        ));
+    }
+
+    let repo_name = match name {
+        Some(name) => name.to_string(),
+        None => Path::new(&top)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("cannot tell this repository's name; pass --name")?
+            .to_string(),
+    };
+
+    let plan = plan_env(&runner(), account).map_err(|e| e.to_string())?;
+    let cli = account.provider.cli();
+    let program = runner()
+        .resolve_in(cli, std::env::var_os("PATH").unwrap_or_default())
+        .ok_or_else(|| {
+            format!(
+                "{cli} is not installed, and it creates {}'s repositories",
+                account.name
+            )
+        })?;
+
+    let mut create = process::Command::new(&program);
+    create.args(create_args(&repo_name, owner, public));
+    for var in &plan.remove {
+        create.env_remove(var);
+    }
+    create.envs(&plan.set);
+    // The shim directory runner() skips is only the default one. A shim
+    // elsewhere would re-resolve the account from this directory, which has no
+    // remote, and inject a different token; the marker makes it refuse instead.
+    create.env(gitwho::sources::FETCHING_TOKEN, "1");
+    let answer = create
+        .output()
+        .map_err(|e| format!("cannot run {cli}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&answer.stdout);
+    if !answer.status.success() {
+        let stderr = String::from_utf8_lossy(&answer.stderr);
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        return Err(format!(
+            "{cli} could not create {repo_name} as {}: {detail}",
+            account.name
+        ));
+    }
+    let created = parse_created(&stdout).map_err(|e| e.to_string())?;
+    println!("created   {}", created.html_url);
+
+    let remote = created.remote(transport(account, requested)).to_string();
+    if !git_succeeds(&cwd, &["remote", "add", "origin", &remote], false) {
+        return Err(format!(
+            "{} exists, but setting origin failed; finish with:\n  git remote add origin {remote} && git push -u origin {branch}",
+            created.html_url
+        ));
+    }
+    println!("origin    {remote}");
+
+    if !git_succeeds(&cwd, &["push", "-u", "origin", &branch], true) {
+        return Err(format!(
+            "{} exists and origin is set, but the push failed; retry with:\n  git push -u origin {branch}",
+            created.html_url
+        ));
+    }
+    println!("pushed    {branch}");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A git command's trimmed stdout, or `None` if it failed or printed nothing.
+fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (output.status.success() && !text.is_empty()).then_some(text)
+}
+
+/// Whether a git command succeeded. `show` lets its output through, for a
+/// push whose progress and errors the user should see.
+fn git_succeeds(dir: &Path, args: &[&str], show: bool) -> bool {
+    let mut command = process::Command::new("git");
+    command.args(args).current_dir(dir);
+    if !show {
+        command
+            .stdout(process::Stdio::null())
+            .stderr(process::Stdio::null());
+    }
+    command.status().is_ok_and(|status| status.success())
 }
 
 /// Run `program` with the environment `plan` describes.

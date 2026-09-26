@@ -8,6 +8,7 @@ pub mod init;
 pub mod mcp;
 pub mod paths;
 pub mod provider;
+pub mod publish;
 pub mod resolve;
 pub mod shim;
 pub mod sources;

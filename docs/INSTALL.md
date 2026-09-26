@@ -465,11 +465,12 @@ Secret Service or Credential Manager.
   `gh` works and says nothing claimed the remote, while the credential helper
   refuses. That is the designed behaviour, not a misconfiguration — a wrong
   account served quietly is the failure this tool was built to prevent.
-- **A brand-new repository is unmatched until it has a remote**, so
-  `gh repo create` run inside it acts as the default account. Pass
-  `gitwho exec --account <name>`, and add the remote before the first commit.
-  The README's [Starting a new repository](../README.md#starting-a-new-repository)
-  has the `gh` and `tea` versions.
+- **A brand-new repository is unmatched until it has a remote**, so a
+  shimmed `gh repo create` run inside it acts as the default account. Use
+  `gitwho publish --account <name>` instead: it creates the repository as
+  that account, sets `origin` and pushes, and refuses if a commit carries
+  another author. See the README's
+  [Starting a new repository](../README.md#starting-a-new-repository).
 - **Two tea logins on one host are refused.** tea's helper is asked by host
   alone and cannot be told which login to use, so gitwho will not guess. That
   includes two servers under different paths on one host, and an `http` and an

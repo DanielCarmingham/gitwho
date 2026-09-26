@@ -1,8 +1,8 @@
 //! Stand-ins for `gh` and `tea`, for tests that run the real binary.
 //!
-//! Each answers the questions gitwho asks — a login's token, and for tea which
-//! logins exist — from files in a temp directory. Any other invocation reports
-//! which variables it was handed, never their values (R10).
+//! Each answers the questions gitwho asks — a login's token, for tea which
+//! logins exist, and an `api -X …` call — from files in a temp directory. Any other
+//! invocation reports which variables it was handed, never their values (R10).
 
 #![allow(dead_code)]
 
@@ -20,6 +20,13 @@ if [ "$1" = auth ] && [ "$2" = token ]; then
   while [ $# -gt 0 ]; do [ "$1" = --user ] && login="$2"; shift; done
   if [ -f "ROOT/gh/$login" ]; then cat "ROOT/gh/$login"; exit 0; fi
   echo "no oauth token found for github.com account $login" >&2
+  exit 1
+fi
+if [ "$1" = api ] && [ "$2" = -X ]; then
+  echo "$*" > "ROOT/gh/api-args"
+  if [ -n "$GH_TOKEN" ]; then echo set > "ROOT/gh/api-token"; else echo unset > "ROOT/gh/api-token"; fi
+  if [ -f "ROOT/gh/api-reply" ]; then cat "ROOT/gh/api-reply"; exit 0; fi
+  echo "gh: Not Found (HTTP 404)" >&2
   exit 1
 fi
 for v in GH_TOKEN GITHUB_PERSONAL_ACCESS_TOKEN GITEA_TOKEN; do
@@ -41,6 +48,13 @@ if [ "$1" = login ] && [ "$2" = helper ] && [ "$3" = get ]; then
     printf 'protocol=https\nhost=%s\nusername=x\npassword=%s\n' "$host" "$(cat "ROOT/tea/token-$host")"
     exit 0
   fi
+  exit 1
+fi
+if [ "$1" = api ] && [ "$2" = -X ]; then
+  echo "$*" > "ROOT/tea/api-args"
+  if [ -n "$GITEA_TOKEN" ]; then echo set > "ROOT/tea/api-token"; else echo unset > "ROOT/tea/api-token"; fi
+  if [ -f "ROOT/tea/api-reply" ]; then cat "ROOT/tea/api-reply"; exit 0; fi
+  echo "Error: 404 Not Found" >&2
   exit 1
 fi
 for v in GITEA_TOKEN GITEA_ACCESS_TOKEN GH_TOKEN; do
@@ -102,6 +116,25 @@ impl FakeTools {
             serde_json::to_string(&*logins).unwrap(),
         )
         .unwrap();
+    }
+
+    /// What `<cli> api …` answers with, as the server's JSON body.
+    pub fn api_reply(&self, cli: &str, body: &str) {
+        std::fs::write(self.dir.path().join(cli).join("api-reply"), body).unwrap();
+    }
+
+    /// The arguments of the last `<cli> api` call, if there was one.
+    pub fn api_args(&self, cli: &str) -> Option<String> {
+        std::fs::read_to_string(self.dir.path().join(cli).join("api-args"))
+            .ok()
+            .map(|s| s.trim().to_string())
+    }
+
+    /// Whether the last `<cli> api` call was handed a token (never its value).
+    pub fn api_saw_token(&self, cli: &str) -> Option<bool> {
+        std::fs::read_to_string(self.dir.path().join(cli).join("api-token"))
+            .ok()
+            .map(|s| s.trim() == "set")
     }
 }
 

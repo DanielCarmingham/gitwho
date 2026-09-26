@@ -125,33 +125,30 @@ produce false passes.
 
 ## Starting a new repository
 
-A repository with no remote gives gitwho nothing to match. It resolves by
-`paths` if the directory is under one, and otherwise falls back to the default
-account — which `gh` will use without complaint, so `gh repo create` can
-quietly create the repository under the wrong account. Name the account, and
-add the remote **before the first commit** so the author identity resolves
-from it too:
+Once a local repository has commits, one command creates it on the account's
+server, points `origin` at it and pushes:
 
 ```sh
-git init acme-widget && cd acme-widget
-gitwho exec --account Work -- \
-    gh repo create example-corp/acme-widget --private --source=. --remote=origin
-gitwho whoami                  # now matched by the remote, not guessed
-git add . && git commit -m 'Initial commit' && git push -u origin main
+gitwho publish --account Work                    # github.com, via gh
+gitwho publish --account SelfHosted              # Gitea/Forgejo, via tea
 ```
 
-On Gitea or Forgejo, `tea` creates the repository but adds no remote:
+- **The account** is the one you name, or the one whose `paths` claims the
+  directory. A repository with no remote gives gitwho nothing else to go on,
+  and it will not publish as the default account on a guess.
+- **Authorship is checked first.** If any commit was authored by someone other
+  than the account's `email` — typically your default identity, because the
+  commit came before the remote did — it stops before creating anything and
+  prints the command that fixes the authors.
+- **`origin` comes from the server's answer**: the ssh URL for an account with
+  an `sshKey`, the https URL otherwise (`--ssh` / `--https` to choose). A
+  server's ssh host often differs from its web host, so it is never guessed.
+- The name defaults to the directory's; `--owner <org>` creates it in an
+  organisation; it is private unless `--public`.
 
-```sh
-gitwho exec --account SelfHosted -- tea repos create --name acme-widget --private
-git remote add origin git@ssh.git.example.net:you/acme-widget.git
-```
-
-`exec` hands tea the account's token and URL under the names it reads; the
-account needs `provider = "gitea"`, `url` and `login`.
-
-Once the remote exists, nothing needs naming again — every later `gh`, `tea`,
-push and commit resolves from it.
+If the push fails after the repository was created, gitwho leaves it in place
+and prints the command to finish. Once `origin` exists, nothing needs naming
+again — every later `gh`, `tea`, push and commit resolves from it.
 
 ## Commands
 
@@ -163,6 +160,7 @@ gitwho whoami        which account this repository resolves to, and why
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
+gitwho publish       create this repo on the account's server, set origin, push
 gitwho shim install  wrapper scripts for gh / tea
 gitwho mcp sync      route provider MCP servers through exec
 ```
@@ -174,7 +172,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 222 tests, clippy clean.
+no longer exports a token per directory. 238 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that
