@@ -7,6 +7,7 @@ pub mod git;
 pub mod init;
 pub mod mcp;
 pub mod paths;
+pub mod provider;
 pub mod resolve;
 pub mod secrets;
 pub mod shim;
