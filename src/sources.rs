@@ -14,6 +14,7 @@
 //! stdout, because stdout is the secret.
 
 use crate::config::{Account, SourcedVar};
+use crate::provider::Provider;
 use crate::secrets::Backend;
 
 /// What a source refused to do, always naming the account and variable so the
@@ -80,6 +81,14 @@ pub trait Runner {
     /// Run and capture. `Ok(None)` means the program is not on `PATH`, which is
     /// a different fact from the program running and refusing.
     fn run(&self, program: &str, args: &[&str]) -> std::io::Result<Option<Captured>>;
+
+    /// Run with `input` on stdin, for tools that take their request there.
+    fn run_input(
+        &self,
+        program: &str,
+        args: &[&str],
+        input: &str,
+    ) -> std::io::Result<Option<Captured>>;
 }
 
 /// Runs commands for real, resolving them past gitwho's own shims.
@@ -166,15 +175,57 @@ fn is_executable(path: &std::path::Path) -> bool {
 
 impl Runner for ProcessRunner {
     fn run(&self, program: &str, args: &[&str]) -> std::io::Result<Option<Captured>> {
+        self.spawn(program, args, None)
+    }
+
+    fn run_input(
+        &self,
+        program: &str,
+        args: &[&str],
+        input: &str,
+    ) -> std::io::Result<Option<Captured>> {
+        self.spawn(program, args, Some(input))
+    }
+}
+
+impl ProcessRunner {
+    fn spawn(
+        &self,
+        program: &str,
+        args: &[&str],
+        input: Option<&str>,
+    ) -> std::io::Result<Option<Captured>> {
+        use std::io::Write;
+        use std::process::Stdio;
+
         let Some(resolved) = self.resolve(program) else {
             return Ok(None);
         };
 
-        let output = match std::process::Command::new(&resolved).args(args).output() {
-            Ok(output) => output,
+        let mut command = std::process::Command::new(&resolved);
+        command
+            .args(args)
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .expect("stdin was piped")
+                .write_all(input.as_bytes())?;
+        }
+        let output = child.wait_with_output()?;
 
         Ok(Some(Captured {
             success: output.status.success(),
@@ -195,6 +246,7 @@ pub struct MapRunner {
     replies: std::collections::HashMap<String, Captured>,
     /// Programs to report as absent from `PATH`.
     missing: std::collections::HashSet<String>,
+    calls: std::cell::RefCell<Vec<(String, Option<String>)>>,
 }
 
 impl MapRunner {
@@ -203,6 +255,7 @@ impl MapRunner {
         Self {
             replies,
             missing: std::collections::HashSet::new(),
+            calls: Default::default(),
         }
     }
 
@@ -221,10 +274,22 @@ impl MapRunner {
         }
         key
     }
-}
 
-impl Runner for MapRunner {
-    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<Option<Captured>> {
+    /// Every invocation so far, as its key and what it was given on stdin.
+    pub fn calls(&self) -> Vec<(String, Option<String>)> {
+        self.calls.borrow().clone()
+    }
+
+    fn answer(
+        &self,
+        program: &str,
+        args: &[&str],
+        input: Option<&str>,
+    ) -> std::io::Result<Option<Captured>> {
+        self.calls
+            .borrow_mut()
+            .push((Self::key(program, args), input.map(String::from)));
+
         if self.missing.contains(program) {
             return Ok(None);
         }
@@ -244,6 +309,21 @@ impl Runner for MapRunner {
                 stderr: format!("MapRunner has no reply for {:?}", Self::key(program, args)),
             },
         }))
+    }
+}
+
+impl Runner for MapRunner {
+    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<Option<Captured>> {
+        self.answer(program, args, None)
+    }
+
+    fn run_input(
+        &self,
+        program: &str,
+        args: &[&str],
+        input: &str,
+    ) -> std::io::Result<Option<Captured>> {
+        self.answer(program, args, Some(input))
     }
 }
 
@@ -385,4 +465,239 @@ fn describe_who(sourced: &SourcedVar) -> String {
         // more than one login.
         (None, None) => "its active account".to_string(),
     }
+}
+
+/// Whose token to fetch: an account, its provider, and the login that
+/// provider's CLI holds it under.
+#[derive(Debug, Clone, Copy)]
+pub struct TokenOwner<'a> {
+    pub account: &'a str,
+    pub provider: Provider,
+    pub login: &'a str,
+    pub url: Option<&'a str>,
+}
+
+/// Why no token came back. Every message names the account first and says
+/// what to run; none ever contains a token.
+#[derive(Debug, thiserror::Error)]
+pub enum TokenError {
+    #[error("{account}: {program} is not installed, and it holds this account's token")]
+    NotInstalled { account: String, program: String },
+    #[error("{account}: {program} failed: {detail}")]
+    Failed {
+        account: String,
+        program: String,
+        detail: String,
+    },
+    #[error("{account}: gh has no token for login {login}: {detail}; run `gh auth login --hostname github.com`")]
+    NoGhLogin {
+        account: String,
+        login: String,
+        detail: String,
+    },
+    #[error("{account}: {program} returned an empty token for login {login}")]
+    Empty {
+        account: String,
+        program: String,
+        login: String,
+    },
+    #[error("{account}: a gitea account needs `url`, the server's https address")]
+    NoUrl { account: String },
+    #[error("{account}: `tea login ls -o json` did not return a login list: {detail}")]
+    TeaList { account: String, detail: String },
+    #[error("{account}: tea has no login for {url}; run `tea login add --url {url}`")]
+    NoTeaLogin { account: String, url: String },
+    #[error(
+        "{account}: tea has {count} logins for {url} ({names}) and cannot be told which to use, \
+         so gitwho will not guess; keep one with `tea login delete`"
+    )]
+    AmbiguousTeaLogin {
+        account: String,
+        url: String,
+        count: usize,
+        names: String,
+    },
+    #[error(
+        "{account}: tea's login for {url} is user {found}, but accounts.toml says login = \"{login}\"; \
+         fix whichever is wrong"
+    )]
+    WrongTeaLogin {
+        account: String,
+        url: String,
+        found: String,
+        login: String,
+    },
+    #[error("{account}: tea has no token for {url}: {detail}")]
+    NoTeaToken {
+        account: String,
+        url: String,
+        detail: String,
+    },
+}
+
+/// The account's token, read on demand from its provider's CLI.
+///
+/// Never falls back: a CLI that cannot answer is an error, because anything
+/// else produces a working-but-wrong credential (R8).
+pub fn token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenError> {
+    match owner.provider {
+        Provider::Github => gh_token(runner, owner),
+        Provider::Gitea => tea_token(runner, owner),
+    }
+}
+
+fn invoke(
+    runner: &dyn Runner,
+    owner: &TokenOwner,
+    program: &str,
+    args: &[&str],
+    input: Option<&str>,
+) -> Result<Captured, TokenError> {
+    let ran = match input {
+        Some(input) => runner.run_input(program, args, input),
+        None => runner.run(program, args),
+    };
+    ran.map_err(|e| TokenError::Failed {
+        account: owner.account.to_string(),
+        program: program.to_string(),
+        detail: e.to_string(),
+    })?
+    .ok_or_else(|| TokenError::NotInstalled {
+        account: owner.account.to_string(),
+        program: program.to_string(),
+    })
+}
+
+/// `--user` reads that login without `gh auth switch`, so nothing global is
+/// mutated (R9), and it wins over an ambient `GH_TOKEN` (gh 2.97.0).
+fn gh_token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenError> {
+    let captured = invoke(
+        runner,
+        owner,
+        "gh",
+        &[
+            "auth",
+            "token",
+            "--hostname",
+            "github.com",
+            "--user",
+            owner.login,
+        ],
+        None,
+    )?;
+    if !captured.success {
+        return Err(TokenError::NoGhLogin {
+            account: owner.account.to_string(),
+            login: owner.login.to_string(),
+            detail: captured.stderr.trim().to_string(),
+        });
+    }
+    non_empty(owner, "gh", captured.stdout.trim())
+}
+
+#[derive(serde::Deserialize)]
+struct TeaLogin {
+    name: String,
+    url: String,
+    #[serde(default)]
+    user: String,
+}
+
+/// tea's helper answers with the *first* login for a host whatever user is
+/// asked for (tea 0.15.1), so it is only asked once the listing proves there
+/// is exactly one candidate and it is the right user.
+fn tea_token(runner: &dyn Runner, owner: &TokenOwner) -> Result<String, TokenError> {
+    let account = owner.account.to_string();
+    let url = owner.url.ok_or_else(|| TokenError::NoUrl {
+        account: account.clone(),
+    })?;
+
+    let listed = invoke(runner, owner, "tea", &["login", "ls", "-o", "json"], None)?;
+    if !listed.success {
+        return Err(TokenError::TeaList {
+            account,
+            detail: listed.stderr.trim().to_string(),
+        });
+    }
+    let logins: Vec<TeaLogin> =
+        serde_json::from_str(&listed.stdout).map_err(|e| TokenError::TeaList {
+            account: account.clone(),
+            detail: e.to_string(),
+        })?;
+
+    let matching: Vec<&TeaLogin> = logins.iter().filter(|l| same_url(&l.url, url)).collect();
+    match matching.as_slice() {
+        [] => {
+            return Err(TokenError::NoTeaLogin {
+                account,
+                url: url.to_string(),
+            })
+        }
+        [only] if only.user == owner.login => {}
+        [only] => {
+            return Err(TokenError::WrongTeaLogin {
+                account,
+                url: url.to_string(),
+                found: only.user.clone(),
+                login: owner.login.to_string(),
+            })
+        }
+        many => {
+            return Err(TokenError::AmbiguousTeaLogin {
+                account,
+                url: url.to_string(),
+                count: many.len(),
+                names: many
+                    .iter()
+                    .map(|l| l.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            })
+        }
+    }
+
+    let request = format!("protocol=https\nhost={}\n\n", host_of(url));
+    let answer = invoke(
+        runner,
+        owner,
+        "tea",
+        &["login", "helper", "get"],
+        Some(&request),
+    )?;
+    if !answer.success {
+        return Err(TokenError::NoTeaToken {
+            account,
+            url: url.to_string(),
+            detail: answer.stderr.trim().to_string(),
+        });
+    }
+    let password = answer
+        .stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("password="))
+        .unwrap_or("")
+        .trim();
+    non_empty(owner, "tea", password)
+}
+
+fn non_empty(owner: &TokenOwner, program: &str, value: &str) -> Result<String, TokenError> {
+    if value.is_empty() {
+        return Err(TokenError::Empty {
+            account: owner.account.to_string(),
+            program: program.to_string(),
+            login: owner.login.to_string(),
+        });
+    }
+    Ok(value.to_string())
+}
+
+fn same_url(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/')
+        .eq_ignore_ascii_case(b.trim_end_matches('/'))
+}
+
+/// The `host[:port]` git's credential protocol names a server by.
+fn host_of(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    rest.split('/').next().unwrap_or(rest)
 }
