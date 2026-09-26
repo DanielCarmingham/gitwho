@@ -179,8 +179,6 @@ fn gitwho(home: &Path, args: &[&str], path: &str) -> std::process::Output {
         // Not inherited: a developer machine has these set, and a test that
         // silently used the real store would be both wrong and dangerous.
         .env_remove("GITWHO_CONFIG")
-        .env_remove("GITWHO_SECRETS")
-        .env_remove("GITWHO_IDENTITY")
         .env_remove("GITWHO_GIT_DIR")
         .output()
         .unwrap()
@@ -248,9 +246,8 @@ fn the_first_write_scaffolds_the_config_and_stops() {
 }
 
 /// `0700` on the directory and `0600` on the config are not hygiene. The
-/// directory is the only thing keeping the identity key out of another local
-/// account's reach, and the config is a redirect vector: whoever can write it
-/// can add a `match` for a host they control and be handed a token.
+/// config is a redirect vector: whoever can write it can add a `match` for a
+/// host they control and be handed a token.
 #[cfg(unix)]
 #[test]
 fn the_scaffolded_store_and_config_are_owner_only() {
@@ -270,7 +267,6 @@ fn the_scaffolded_store_and_config_are_owner_only() {
         mode(home.path().join(".config/gitwho/accounts.toml")),
         0o600
     );
-    assert_eq!(mode(home.path().join(".config/gitwho/identity.key")), 0o600);
 }
 
 /// What the scaffold hands you must be usable as-is. If the shipped template

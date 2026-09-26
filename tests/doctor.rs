@@ -3,7 +3,6 @@ use std::path::Path;
 
 use gitwho::config::Config;
 use gitwho::doctor::{self, GitWiring, Level, Store};
-use gitwho::secrets::{BackendKind, Choice, Source};
 use gitwho::sources::{Captured, MapRunner};
 use tempfile::TempDir;
 
@@ -95,7 +94,7 @@ fn set_mode(path: &Path, mode: u32) {
 fn set_mode(_path: &Path, _mode: u32) {}
 
 /// A store laid out the way the cutover left the real machine: the directory
-/// owner-only, the three files owner-read-write.
+/// owner-only, `accounts.toml` owner-read-write.
 ///
 /// The contents are inert placeholders -- this fixture is about modes, and
 /// nothing here should ever be mistaken for, or shaped like, a token.
@@ -105,13 +104,11 @@ fn hardened_store() -> TempDir {
     // mkdtemp already gives 0700, but say it rather than rely on it.
     set_mode(dir.path(), 0o700);
 
-    for name in ["accounts.toml", "identity.key", "secrets.age"] {
-        let path = dir.path().join(name);
-        std::fs::write(&path, b"# placeholder\n").unwrap();
-        // The developer's umask decides what `write` produces (0644 here), so
-        // the mode has to be set explicitly for the fixture to mean anything.
-        set_mode(&path, 0o600);
-    }
+    let path = dir.path().join("accounts.toml");
+    std::fs::write(&path, b"# placeholder\n").unwrap();
+    // The developer's umask decides what `write` produces (0644 here), so
+    // the mode has to be set explicitly for the fixture to mean anything.
+    set_mode(&path, 0o600);
 
     dir
 }
@@ -120,16 +117,7 @@ fn store_at(dir: &Path) -> Store {
     Store {
         dir: dir.to_path_buf(),
         config: dir.join("accounts.toml"),
-        identity: dir.join("identity.key"),
-        secrets: dir.join("secrets.age"),
         owner: doctor::current_uid(),
-        backend: Choice {
-            kind: BackendKind::AgeFile,
-            source: Source::Default,
-        },
-        // No `Default` for `Store`: a default claiming owner-only permissions
-        // would be a lie on the one platform this field exists to catch.
-        owner_only_enforced: true,
     }
 }
 
@@ -539,64 +527,6 @@ fn a_permission_finding_says_what_to_run_to_fix_it() {
     );
 }
 
-/// Anything able to read the identity key can decrypt secrets.age -- the
-/// encryption protects the file at rest, not against a local reader.
-// Modes only exist where `check_permissions` does.
-#[cfg(unix)]
-#[test]
-fn a_readable_identity_key_is_a_problem() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    set_mode(&dir.path().join("identity.key"), 0o640);
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store_at(dir.path()),
-    );
-
-    let messages: Vec<_> = permission_problems(&findings)
-        .iter()
-        .map(|f| f.message.clone())
-        .collect();
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("identity.key") && m.contains("0640")),
-        "the loosened identity key should be named; got {messages:?}"
-    );
-}
-
-// Modes only exist where `check_permissions` does.
-#[cfg(unix)]
-#[test]
-fn a_readable_secrets_file_is_a_problem() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    set_mode(&dir.path().join("secrets.age"), 0o644);
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store_at(dir.path()),
-    );
-
-    let messages: Vec<_> = permission_problems(&findings)
-        .iter()
-        .map(|f| f.message.clone())
-        .collect();
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("secrets.age") && m.contains("0644")),
-        "the loosened secrets file should be named; got {messages:?}"
-    );
-}
-
 // Modes only exist where `check_permissions` does.
 #[cfg(unix)]
 #[test]
@@ -621,132 +551,18 @@ fn a_store_owned_by_someone_else_is_a_problem() {
         .iter()
         .map(|f| f.message.clone())
         .collect();
-    for name in ["accounts.toml", "identity.key", "secrets.age"] {
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains(name) && m.contains("owned by")),
-            "{name} should be reported as foreign-owned; got {messages:?}"
-        );
-    }
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("accounts.toml") && m.contains("owned by")),
+        "accounts.toml should be reported as foreign-owned; got {messages:?}"
+    );
     let named = dir.path().display().to_string();
     assert!(
         messages
             .iter()
             .any(|m| m.contains(&named) && m.contains("owned by")),
         "the directory should be reported as foreign-owned; got {messages:?}"
-    );
-}
-
-/// A fresh install has no secrets.age until the first `secret set`. Absence is
-/// check_secrets' business; reporting it here too would make a clean install
-/// look broken.
-// Modes only exist where `check_permissions` does.
-#[cfg(unix)]
-#[test]
-fn a_store_with_no_secrets_file_yet_is_not_a_permission_problem() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    std::fs::remove_file(dir.path().join("secrets.age")).unwrap();
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store_at(dir.path()),
-    );
-
-    assert!(
-        permission_problems(&findings).is_empty(),
-        "a not-yet-created file is not a permissions failure; got {:?}",
-        permission_problems(&findings)
-    );
-}
-
-/// "Which store am I using" is only half the question; the other half is what
-/// decided. A machine whose `accounts.toml` says one thing and whose shell says
-/// another is exactly when someone runs `doctor`.
-#[test]
-fn doctor_names_the_backend_in_effect_and_where_the_choice_came_from() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    let mut store = store_at(dir.path());
-    store.backend = Choice {
-        kind: BackendKind::Keychain,
-        source: Source::Environment,
-    };
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store,
-    );
-
-    let reported = findings
-        .iter()
-        .find(|f| f.check == "backend")
-        .expect("doctor should say which store is in effect");
-    assert!(
-        reported.message.contains("keychain") && reported.message.contains("GITWHO_SECRET_BACKEND"),
-        "the store and what chose it should both be named; got: {}",
-        reported.message
-    );
-}
-
-/// Where owner-only permissions cannot be applied -- Windows, where gitwho
-/// writes no ACLs -- the no-op has to be visible. Reporting the gap is the
-/// honest alternative to shipping ACL code nobody here can run.
-#[test]
-fn doctor_warns_when_owner_only_permissions_cannot_be_enforced() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    let mut store = store_at(dir.path());
-    store.owner_only_enforced = false;
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store,
-    );
-
-    let warned = findings
-        .iter()
-        .find(|f| f.level == Level::Warn && f.message.contains("secrets.age"))
-        .expect("the unenforceable permission should be warned about by name");
-    assert_eq!(warned.check, "backend");
-}
-
-/// The keychain keeps nothing on disk, so a permissions warning about a file
-/// that does not exist would be noise pointing at the wrong thing.
-#[test]
-fn a_keychain_store_is_not_warned_about_file_permissions() {
-    let config = Config::parse(ACCOUNTS).unwrap();
-    let dir = hardened_store();
-    let mut store = store_at(dir.path());
-    store.backend = Choice {
-        kind: BackendKind::Keychain,
-        source: Source::Config,
-    };
-    store.owner_only_enforced = false;
-
-    let findings = doctor::run(
-        &config,
-        &no_sources(),
-        &BTreeMap::new(),
-        &healthy_wiring(),
-        &store,
-    );
-
-    assert!(
-        !findings
-            .iter()
-            .any(|f| f.level == Level::Warn && f.message.contains("secrets.age")),
-        "a store with no file should raise no file-permission warning; got {findings:?}"
     );
 }
 
@@ -932,4 +748,32 @@ fn a_fallback_variable_in_the_environment_is_reported() {
         .find(|f| f.level == Level::Warn && f.message.contains("GITHUB_TOKEN"))
         .expect("an ambient fallback variable should be reported");
     assert!(!warned.message.contains("leaked"), "{}", warned.message);
+}
+
+/// Left behind by 0.2: harmless, but nothing reads them now, and they still
+/// hold every token they ever stored.
+#[test]
+fn a_leftover_secret_store_is_reported_as_unused_and_never_deleted() {
+    let dir = hardened_store();
+    std::fs::write(dir.path().join("secrets.age"), "x").unwrap();
+    std::fs::write(dir.path().join("identity.key"), "x").unwrap();
+    let config = Config::parse(ACCOUNTS).unwrap();
+
+    let findings = doctor::run(
+        &config,
+        &stocked_runner(),
+        &BTreeMap::new(),
+        &healthy_wiring(),
+        &store_at(dir.path()),
+    );
+
+    for file in ["secrets.age", "identity.key"] {
+        assert!(
+            findings.iter().any(|f| f.level == Level::Warn
+                && f.message.contains(file)
+                && f.message.contains("no longer used")),
+            "{file} not reported: {findings:#?}"
+        );
+        assert!(dir.path().join(file).exists(), "{file} was deleted");
+    }
 }

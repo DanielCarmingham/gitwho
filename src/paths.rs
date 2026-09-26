@@ -14,8 +14,7 @@ use std::path::PathBuf;
 pub enum PathError {
     #[error(
         "none of {} is set, so there is no home directory to put gitwho's files \
-         under; set one, or point GITWHO_CONFIG, GITWHO_SECRETS and \
-         GITWHO_IDENTITY at explicit paths",
+         under; set one, or point GITWHO_CONFIG at an explicit path",
         .consulted.join(", ")
     )]
     NoHome {

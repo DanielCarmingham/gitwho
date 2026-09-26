@@ -63,9 +63,6 @@ fn git_credential_fill_in(dir: &Path, url: &str, cwd: &Path, path: &str) -> std:
         // declined without us noticing.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GITWHO_CONFIG", dir.join("accounts.toml"))
-        .env("GITWHO_SECRETS", dir.join("secrets.age"))
-        .env("GITWHO_IDENTITY", dir.join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .env("PATH", path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -222,14 +219,7 @@ fn a_non_unicode_variable_elsewhere_in_the_environment_is_ignored() {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for var in [
-        "GITWHO_CONFIG",
-        "GITWHO_SECRETS",
-        "GITWHO_IDENTITY",
-        "GITWHO_SECRET_BACKEND",
-    ] {
-        command.env_remove(var);
-    }
+    command.env_remove("GITWHO_CONFIG");
     let mut child = command.spawn().expect("gitwho should run");
 
     child
@@ -320,9 +310,6 @@ fn exec_scrubs_a_hostile_token_inherited_from_the_parent_shell() {
         .args(["exec", "--", "/usr/bin/env"])
         .current_dir(&repo)
         .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
-        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .env("PATH", fakes.path())
         .output()
@@ -359,7 +346,6 @@ fn a_generated_shim_routes_a_cli_through_exec() {
         .arg(&shim_dir)
         .arg("env")
         .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .output()
         .unwrap();
     assert!(
@@ -371,9 +357,6 @@ fn a_generated_shim_routes_a_cli_through_exec() {
     let output = Command::new(shim_dir.join("env"))
         .current_dir(&repo)
         .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
-        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .env("GH_TOKEN", "hostile-github-token")
         .env("PATH", format!("{}:{}", shim_dir.display(), fakes.path()))
         .output()
@@ -409,9 +392,6 @@ fn exec_works_in_a_third_party_clone_but_says_so() {
         .args(["exec", "--", "/usr/bin/env"])
         .current_dir(&repo)
         .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
-        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .env("PATH", fakes.path())
         .output()
         .unwrap();
@@ -470,10 +450,7 @@ fn a_missing_home_does_not_read_config_from_the_working_directory() {
         "USERPROFILE",
         "APPDATA",
         "GITWHO_CONFIG",
-        "GITWHO_SECRETS",
-        "GITWHO_IDENTITY",
         "GITWHO_GIT_DIR",
-        "GITWHO_SECRET_BACKEND",
     ] {
         command.env_remove(var);
     }
@@ -524,9 +501,6 @@ fn doctor_reports_a_world_readable_config_file() {
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .env("GITWHO_CONFIG", dir.path().join("accounts.toml"))
-        .env("GITWHO_SECRETS", dir.path().join("secrets.age"))
-        .env("GITWHO_IDENTITY", dir.path().join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND")
         .env("PATH", fakes.path())
         .output()
         .unwrap();

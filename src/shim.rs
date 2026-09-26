@@ -278,9 +278,9 @@ fn make_executable(path: &Path) -> Result<(), ShimError> {
     })
 }
 
-/// A genuine no-op, unlike the one in `secrets::age_file`: Windows decides
-/// executability from the extension, and `shim_file_name` has already supplied
-/// `.cmd`. Nothing is lost here, so nothing needs reporting.
+/// A genuine no-op: Windows decides executability from the extension, and
+/// `shim_file_name` has already supplied `.cmd`. Nothing is lost here, so
+/// nothing needs reporting.
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) -> Result<(), ShimError> {
     Ok(())

@@ -59,10 +59,7 @@ fn whoami(config_dir: &Path, cwd: &Path, args: &[&str]) -> std::process::Output 
     cmd.arg("whoami")
         .args(args)
         .current_dir(cwd)
-        .env("GITWHO_CONFIG", config_dir.join("accounts.toml"))
-        .env("GITWHO_SECRETS", config_dir.join("secrets.age"))
-        .env("GITWHO_IDENTITY", config_dir.join("identity.key"))
-        .env_remove("GITWHO_SECRET_BACKEND");
+        .env("GITWHO_CONFIG", config_dir.join("accounts.toml"));
     cmd.output().unwrap()
 }
 

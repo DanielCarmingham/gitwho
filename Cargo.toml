@@ -10,8 +10,8 @@ homepage = "https://github.com/DanielCarmingham/gitwho"
 readme = "README.md"
 keywords = ["git", "credentials", "identity", "github", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-# Measured, not guessed: `cargo +1.88 build --locked` succeeds and keyring
-# 4.1.6 declares 1.88.0 itself. CI pins this exact version so it cannot drift.
+# Measured: `cargo +1.88 build --locked` succeeds (2026-09-26). CI pins this
+# exact version so it cannot drift.
 rust-version = "1.88"
 # Only the prose is excluded. `docs/accounts.toml.example` must stay in the
 # tarball -- `init::TEMPLATE` is an `include_str!` of it, so excluding it breaks
@@ -57,14 +57,10 @@ inherits = "release"
 lto = "thin"
 
 [dependencies]
-age = "0.12.1"
 clap = { version = "4.6.6", features = ["derive"] }
 globset = "0.4"
-keyring = "4.1.6"
-# Only for geteuid, which std does not expose. Already in the graph via
-# keyring, so this costs nothing.
+# Only for geteuid, which std does not expose.
 libc = "0.2"
-rpassword = "7.5.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sha2 = "0.11.0"

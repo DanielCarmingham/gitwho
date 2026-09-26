@@ -49,7 +49,6 @@ impl Fixture {
         cmd.args(args)
             .current_dir(self.dir.path())
             .env("GITWHO_CONFIG", self.dir.path().join("accounts.toml"))
-            .env_remove("GITWHO_SECRET_BACKEND")
             .env("PATH", self.fakes.path());
         match inherited_token {
             Some(token) => cmd.env("GH_TOKEN", token),

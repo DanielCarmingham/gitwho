@@ -11,8 +11,6 @@ use gitwho::config::Config;
 use gitwho::credential::{respond, Request};
 use gitwho::exec::{plan_cleared, plan_env};
 use gitwho::resolve::{resolve_repo, Reason};
-use gitwho::secrets::select::{self, BackendKind, Choice, Platform};
-use gitwho::secrets::AgeFileBackend;
 use gitwho::sources::ProcessRunner;
 
 const EXEC_EXAMPLES: &str = "\
@@ -241,7 +239,6 @@ fn main() -> ExitCode {
 
 fn doctor_report() -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
-    let choice = choose_backend(None)?;
 
     let ambient: std::collections::BTreeMap<String, String> = unicode_env().collect();
     let cwd = std::env::current_dir().ok();
@@ -266,11 +263,7 @@ fn doctor_report() -> Result<ExitCode, String> {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(".")),
         config: config_file,
-        identity: identity_path()?,
-        secrets: secrets_path()?,
         owner: gitwho::doctor::current_uid(),
-        backend: choice,
-        owner_only_enforced: AgeFileBackend::protection() == gitwho::secrets::Protection::OwnerOnly,
     };
 
     let findings = gitwho::doctor::run(&config, &runner(), &ambient, &wiring, &store);
@@ -294,9 +287,10 @@ fn doctor_report() -> Result<ExitCode, String> {
 
 /// Everything the manual install did, in one idempotent command.
 ///
-/// The order matters and is the order of the guide: the store must exist before
-/// a key can go in it, the config must be right before rules are generated from
-/// it, and the rules must exist before anything is told to include them.
+/// The order matters and is the order of the guide: gitwho's directory must
+/// exist before the config can go in it, the config must be right before
+/// rules are generated from it, and the rules must exist before anything is
+/// told to include them.
 ///
 /// It stops at the one step it cannot do for you. `accounts.toml` needs *your*
 /// accounts, and generating rules from a template of placeholders would produce
@@ -312,42 +306,27 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
         None => default_shim_dir()?,
     };
 
-    // --- 1. the store, and the key that unlocks it --------------------------
-    let choice = choose_backend(None)?;
-    if choice.kind == BackendKind::AgeFile {
-        let identity = identity_path()?;
-        if identity.exists() {
-            step("ok", format!("store {}", store.display()));
-        } else if write {
-            AgeFileBackend::generate_identity_file(&identity).map_err(|e| e.to_string())?;
-            step("created", format!("{} (owner-only)", identity.display()));
-        } else {
-            step("would create", format!("{}", identity.display()));
-        }
-
-        // After the key exists, so the directory is certain to be there. The
-        // install script writes its receipt into this same directory with a
-        // plain `mkdir -p`, so on a fresh machine it can already be 0755 --
-        // permissions gitwho never set, which `doctor` would then fail on.
-        if store.exists() {
-            match gitwho::init::ensure_owner_only(&store, write)
-                .map_err(|e| format!("cannot check {}: {e}", store.display()))?
-            {
-                gitwho::init::Mode::AlreadyOwnerOnly | gitwho::init::Mode::NotApplicable => {}
-                gitwho::init::Mode::Tightened => step(
-                    "tightened",
-                    format!("{} to 0700 (was group- or world-readable)", store.display()),
-                ),
-                gitwho::init::Mode::WouldTighten => {
-                    step("would fix", format!("{} is not 0700", store.display()))
-                }
+    // --- 1. gitwho's own directory -------------------------------------------
+    if store.exists() {
+        match gitwho::init::ensure_owner_only(&store, write)
+            .map_err(|e| format!("cannot check {}: {e}", store.display()))?
+        {
+            gitwho::init::Mode::AlreadyOwnerOnly | gitwho::init::Mode::NotApplicable => {
+                step("ok", format!("{}", store.display()))
+            }
+            gitwho::init::Mode::Tightened => step(
+                "tightened",
+                format!("{} to 0700 (was group- or world-readable)", store.display()),
+            ),
+            gitwho::init::Mode::WouldTighten => {
+                step("would fix", format!("{} is not 0700", store.display()))
             }
         }
+    } else if write {
+        create_owner_only_dir(&store)?;
+        step("created", format!("{} (owner-only)", store.display()));
     } else {
-        step(
-            "ok",
-            format!("store: {} (no key file needed)", choice.kind.name()),
-        );
+        step("would create", format!("{}", store.display()));
     }
 
     // --- 2. the config, which is where this stops ---------------------------
@@ -442,6 +421,24 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
 
     println!();
     doctor_report()
+}
+
+/// Only the leaf gets 0700; creating `~/.config` with that mode would be
+/// gitwho reaching past its own directory.
+fn create_owner_only_dir(dir: &Path) -> Result<(), String> {
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder
+        .create(dir)
+        .map_err(|e| format!("cannot create {}: {e}", dir.display()))
 }
 
 /// Print one aligned step line. Every step says what happened, including
@@ -881,21 +878,8 @@ fn unicode_env() -> impl Iterator<Item = (String, String)> {
         .filter_map(|(var, value)| Some((var.into_string().ok()?, value.into_string().ok()?)))
 }
 
-fn choose_backend(configured: Option<&str>) -> Result<Choice, String> {
-    let from_env = std::env::var(select::ENV_VAR).ok();
-    select::choose(from_env.as_deref(), configured, &Platform::detect()).map_err(|e| e.to_string())
-}
-
 fn config_path() -> Result<PathBuf, String> {
     path_from_env("GITWHO_CONFIG", "accounts.toml")
-}
-
-fn secrets_path() -> Result<PathBuf, String> {
-    path_from_env("GITWHO_SECRETS", "secrets.age")
-}
-
-fn identity_path() -> Result<PathBuf, String> {
-    path_from_env("GITWHO_IDENTITY", "identity.key")
 }
 
 /// A command runner that will not find gitwho's own shims.

@@ -129,10 +129,8 @@ pub enum Mode {
 
 /// Close the store directory down to `0700`, even if something else created it.
 ///
-/// `secrets::age_file` deliberately narrows only a directory *it* creates: it
-/// runs on every `secret set`, and chmodding a directory someone else owns
-/// would be a side effect nobody asked for. `init --write` is the opposite
-/// situation -- an explicit setup command, run deliberately, on gitwho's own
+/// `init` creates the directory 0700 itself, and only tightens one it finds
+/// looser -- an explicit setup command, run deliberately, on gitwho's own
 /// directory, where `doctor` otherwise just prints `chmod 700` and waits.
 ///
 /// This is not hypothetical. dist's shell installer writes its receipt to

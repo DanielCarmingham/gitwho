@@ -217,9 +217,9 @@ impl ProcessRunner {
 ///
 /// Every failure this module can report -- not installed, no such account,
 /// empty output -- is one that cannot be produced on demand by a machine with
-/// the real tool installed and logged in. Shipped alongside the real runner for
-/// the same reason [`crate::secrets::EnvBackend`] is: a fake that lives in the
-/// library is one the library's own contract is tested against.
+/// the real tool installed and logged in. Shipped alongside the real runner
+/// rather than confined to `tests/`: a fake that lives in the library is one
+/// the library's own contract is tested against.
 pub struct MapRunner {
     replies: std::collections::HashMap<String, Captured>,
     /// Programs to report as absent from `PATH`.
@@ -538,4 +538,18 @@ fn same_url(a: &str, b: &str) -> bool {
 fn host_of(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     rest.split('/').next().unwrap_or(rest)
+}
+
+/// A short, stable identifier for a value that reveals nothing about it.
+///
+/// This is the only representation of a secret that may appear in output,
+/// logs, or error messages. It exists so a checker can say "these two are the
+/// same" or "this one changed" without ever printing token material.
+pub fn fingerprint(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(value.as_bytes());
+    // 12 hex characters -- enough to distinguish a handful of tokens by eye,
+    // far too little to attack the preimage.
+    digest[..6].iter().map(|b| format!("{b:02x}")).collect()
 }
