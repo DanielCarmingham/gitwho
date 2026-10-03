@@ -134,7 +134,7 @@ gitwho publish --account SelfHosted              # Gitea/Forgejo, via tea
 ```
 
 - **The account** is the one you name, or the one whose `paths` claims the
-  directory. A repository with no remote gives gitwho nothing else to go on,
+  directory; `gitwho accounts` lists the names. A repository with no remote gives gitwho nothing else to go on,
   and it will not publish as the default account on a guess.
 - **Authorship is checked first.** If any commit was authored by someone other
   than the account's `email` — typically your default identity, because the
@@ -186,6 +186,7 @@ gitwho init          set everything up; safe to re-run
 gitwho init --discover <roots>   propose accounts.toml from repos on disk
 gitwho doctor        report whether the wiring is coherent (read-only)
 gitwho whoami        which account this repository resolves to, and why
+gitwho accounts      the accounts in accounts.toml; --quiet for names only
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
@@ -201,7 +202,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 247 tests, clippy clean.
+no longer exports a token per directory. 253 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

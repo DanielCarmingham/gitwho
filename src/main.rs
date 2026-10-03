@@ -28,6 +28,9 @@ Examples:
 
 const PUBLISH_EXAMPLES: &str = "\
 Examples:
+  See which account names --account accepts:
+    gitwho accounts
+
   Publish the repository in this directory as a GitHub account, privately:
     gitwho publish --account Work
 
@@ -76,6 +79,7 @@ enum Command {
     #[command(after_long_help = EXEC_EXAMPLES)]
     Exec {
         /// Use this account instead of resolving one from the current repo.
+        /// `gitwho accounts` lists the names.
         #[arg(long)]
         account: Option<String>,
         /// The command to run, after `--`.
@@ -91,7 +95,7 @@ enum Command {
     /// authored by anyone but that account, unless --keep-authors is given.
     #[command(after_long_help = PUBLISH_EXAMPLES)]
     Publish {
-        /// The account to publish as.
+        /// The account to publish as. `gitwho accounts` lists the names.
         #[arg(long)]
         account: Option<String>,
         /// The repository's name on the server. Defaults to this directory's.
@@ -152,6 +156,13 @@ enum Command {
     Whoami {
         /// Print only the account name, and fail rather than answer when
         /// nothing identified it.
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// List the accounts in accounts.toml -- the names `--account` takes.
+    Accounts {
+        /// Print only the names, one per line.
         #[arg(long)]
         quiet: bool,
     },
@@ -249,6 +260,13 @@ fn main() -> ExitCode {
         }
         Command::Whoami { quiet } => match whoami(quiet) {
             Ok(code) => code,
+            Err(message) => {
+                eprintln!("gitwho: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Accounts { quiet } => match accounts(quiet) {
+            Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
@@ -715,6 +733,57 @@ fn shim(action: ShimAction) -> Result<(), String> {
     }
 }
 
+fn accounts(quiet: bool) -> Result<(), String> {
+    let path = config_path()?;
+    let config = Config::load(&path).map_err(|e| e.to_string())?;
+
+    if config.accounts.is_empty() {
+        eprintln!("gitwho: no accounts in {}", path.display());
+        return Ok(());
+    }
+    if quiet {
+        for account in &config.accounts {
+            println!("{}", account.name);
+        }
+        return Ok(());
+    }
+
+    let rows: Vec<[&str; 5]> = config
+        .accounts
+        .iter()
+        .map(|a| {
+            let server = a.url.as_deref().unwrap_or("github.com");
+            [&a.name, a.provider.name(), &a.login, server, &a.email]
+        })
+        .collect();
+    let header = ["NAME", "PROVIDER", "LOGIN", "SERVER", "EMAIL"];
+    let widths: Vec<usize> = (0..header.len())
+        .map(|col| {
+            std::iter::once(&header)
+                .chain(&rows)
+                .map(|row| row[col].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let line = |row: &[&str; 5], default: bool| {
+        let mut out = String::new();
+        for (cell, width) in row.iter().zip(&widths) {
+            out.push_str(&format!("{cell:<width$}  "));
+        }
+        if default {
+            out.push_str("(default)");
+        }
+        out.trim_end().to_string()
+    };
+
+    println!("{}", line(&header, false));
+    for (account, row) in config.accounts.iter().zip(&rows) {
+        println!("{}", line(row, account.name == config.defaults.account));
+    }
+    Ok(())
+}
+
 fn whoami(quiet: bool) -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -835,7 +904,7 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
     let account = match account_name {
         Some(name) => config
             .account(name)
-            .ok_or_else(|| format!("no account named {name:?}"))?,
+            .ok_or_else(|| format!("no account named {name:?}; `gitwho accounts` lists them"))?,
         // Unlike the credential path, a low-confidence resolution is allowed
         // here: running `gh` outside any repo, or inside a third-party clone,
         // should use the declared default. Refusing would be hostile rather
@@ -902,7 +971,7 @@ fn publish(
         )?;
         config
             .account(named)
-            .ok_or_else(|| format!("no account named {named:?}"))?
+            .ok_or_else(|| format!("no account named {named:?}; `gitwho accounts` lists them"))?
     } else {
         choose_account(&config, account_name, &cwd).map_err(|e| e.to_string())?
     };

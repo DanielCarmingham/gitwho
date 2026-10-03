@@ -14,11 +14,11 @@ use crate::resolve::{self, Reason};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PublishError {
-    #[error("no account named {0:?}")]
+    #[error("no account named {0:?}; `gitwho accounts` lists them")]
     UnknownAccount(String),
     #[error(
         "no account claims this directory through `paths`, and publishing as the default \
-         would be a guess; name the account with --account <name>"
+         would be a guess; name the account with --account <name> (`gitwho accounts` lists them)"
     )]
     NoAccount,
     #[error(transparent)]

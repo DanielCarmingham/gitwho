@@ -151,6 +151,10 @@ github.com`, or `tea login add --url <url>`.
 command — failing rather than answering when nothing identified it, since a
 plausible wrong name is worse than no name.
 
+`gitwho accounts` lists every account in `accounts.toml` with its provider,
+login, server and email, marking the default. Those names are what
+`--account` takes; `gitwho accounts --quiet` prints only the names.
+
 The credential helper refuses to write against a repository no account
 claims. The declared default would accept the write and look healthy in
 `doctor` afterwards, which is the wrong-and-quiet failure (R8) rather than a
