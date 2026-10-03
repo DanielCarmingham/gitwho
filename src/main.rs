@@ -997,6 +997,11 @@ fn exec(account_name: Option<&str>, command: &[String]) -> Result<ExitCode, Stri
                 .and_then(|name| name.to_str())
                 .unwrap_or(program)
         );
+        if gitwho::shim::refreshes_active_github_login(program, args) {
+            if let Some(note) = refresh_note(account_name, args) {
+                eprintln!("{note}");
+            }
+        }
         return run_with(program, args, &plan_cleared());
     }
 
@@ -1226,6 +1231,53 @@ fn git_succeeds(dir: &Path, args: &[&str], show: bool) -> bool {
 }
 
 /// Run `program` with the environment `plan` describes.
+/// What to say when `gh auth refresh` is about to change a login other than
+/// the one every other gh command here would use. Advisory, so any question
+/// it cannot answer means saying nothing rather than stopping the refresh.
+fn refresh_note(account_name: Option<&str>, args: &[String]) -> Option<String> {
+    let config = Config::load(&config_path().ok()?).ok()?;
+    let (account, source) = match account_name {
+        Some(name) => (config.account(name)?, "--account names"),
+        None => {
+            let resolved = resolve_repo(&config, &std::env::current_dir().ok()?).ok()?;
+            if !resolved.reason.identifies_an_account() {
+                return None;
+            }
+            (resolved.account, "this directory resolves to")
+        }
+    };
+    if account.provider != gitwho::provider::Provider::Github {
+        return None;
+    }
+    let active = gitwho::sources::gh_active_login(&runner())?;
+    if active == account.login {
+        return None;
+    }
+
+    let refresh: Vec<String> = args.iter().map(|arg| shell_quote(arg)).collect();
+    Some(format!(
+        "gitwho: gh will refresh its active login, {active}, but {source} {} (gh login {}).\n\
+         gitwho: to refresh that one instead:\n    \
+         gh auth switch --user {} && gh {} && gh auth switch --user {active}",
+        account.name,
+        account.login,
+        account.login,
+        refresh.join(" ")
+    ))
+}
+
+fn shell_quote(arg: &str) -> String {
+    let plain = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.,:/=@+".contains(c));
+    if plain {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', r"'\''"))
+    }
+}
+
 fn run_with(
     program: &str,
     args: &[String],

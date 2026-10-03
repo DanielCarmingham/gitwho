@@ -285,3 +285,77 @@ mod fetches_token {
         assert!(!fetches_token("git", &args(&["auth", "token"])));
     }
 }
+
+mod refreshes_active_github_login {
+    use gitwho::shim::refreshes_active_github_login;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn gh_auth_refresh_acts_on_the_active_login() {
+        assert!(refreshes_active_github_login(
+            "gh",
+            &args(&["auth", "refresh"])
+        ));
+        assert!(refreshes_active_github_login(
+            "/opt/homebrew/bin/gh",
+            &args(&["auth", "refresh", "--scopes", "write:packages"])
+        ));
+    }
+
+    #[test]
+    fn github_com_named_explicitly_is_still_github_com() {
+        for hostname in [
+            &["--hostname", "github.com"][..],
+            &["-h", "github.com"],
+            &["--hostname=github.com"],
+        ] {
+            let mut list = vec!["auth", "refresh"];
+            list.extend_from_slice(hostname);
+            assert!(
+                refreshes_active_github_login("gh", &args(&list)),
+                "{list:?}"
+            );
+        }
+    }
+
+    /// gitwho's github accounts are all on github.com, so it has nothing to
+    /// say about another host's active login.
+    #[test]
+    fn another_host_is_not_ours_to_comment_on() {
+        for hostname in [
+            &["--hostname", "ghe.example.com"][..],
+            &["-h", "ghe.example.com"],
+            &["--hostname=ghe.example.com"],
+        ] {
+            let mut list = vec!["auth", "refresh"];
+            list.extend_from_slice(hostname);
+            assert!(
+                !refreshes_active_github_login("gh", &args(&list)),
+                "{list:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn other_commands_do_not() {
+        assert!(!refreshes_active_github_login(
+            "gh",
+            &args(&["auth", "login"])
+        ));
+        assert!(!refreshes_active_github_login(
+            "gh",
+            &args(&["auth", "logout"])
+        ));
+        assert!(!refreshes_active_github_login(
+            "gh",
+            &args(&["auth", "status"])
+        ));
+        assert!(!refreshes_active_github_login(
+            "tea",
+            &args(&["auth", "refresh"])
+        ));
+    }
+}

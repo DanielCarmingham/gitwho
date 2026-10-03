@@ -310,3 +310,79 @@ fn the_fetch_marker_still_lets_a_token_fetch_through_without_injecting_one() {
     assert!(output.status.success(), "{combined}");
     assert!(combined.contains("GH_TOKEN: unset"), "{combined}");
 }
+
+/// `gh auth status` through the shim names this directory's account, while
+/// `gh auth refresh` acts on gh's own active login. Run back to back they
+/// disagree, so the refresh says which login it is about to change.
+#[test]
+fn refresh_names_gh_s_active_login_when_it_is_not_this_directory_s() {
+    let fixture = Fixture::new();
+    fixture.fakes.gh_active("brandnew");
+
+    let output = fixture.run(
+        &[
+            "exec",
+            "--",
+            "gh",
+            "auth",
+            "refresh",
+            "--scopes",
+            "write:packages",
+        ],
+        None,
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{}", out(&output));
+    assert!(out(&output).contains("GH_TOKEN: unset"), "{}", out(&output));
+    assert!(stderr.contains("brandnew"), "{stderr}");
+    assert!(stderr.contains("Personal"), "{stderr}");
+    assert!(
+        stderr.contains(
+            "gh auth switch --user personal && gh auth refresh --scopes write:packages \
+             && gh auth switch --user brandnew"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn refresh_says_nothing_more_when_the_active_login_is_this_directory_s() {
+    let fixture = Fixture::new();
+    fixture.fakes.gh_active("personal");
+
+    let output = fixture.run(&["exec", "--", "gh", "auth", "refresh"], None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{}", out(&output));
+    assert!(stderr.contains("no token was injected"), "{stderr}");
+    assert!(!stderr.contains("switch"), "{stderr}");
+}
+
+/// Best effort: a gh that cannot say who is active must not stop the refresh.
+#[test]
+fn refresh_still_runs_when_gh_cannot_say_who_is_active() {
+    let fixture = Fixture::new();
+
+    let output = fixture.run(&["exec", "--", "gh", "auth", "refresh"], None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "{}", out(&output));
+    assert!(
+        out(&output).contains("args: auth refresh"),
+        "{}",
+        out(&output)
+    );
+    assert!(!stderr.contains("switch"), "{stderr}");
+}
+
+#[test]
+fn login_is_not_given_the_refresh_note() {
+    let fixture = Fixture::new();
+    fixture.fakes.gh_active("brandnew");
+
+    let output = fixture.run(&["exec", "--", "gh", "auth", "login"], None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!stderr.contains("switch"), "{stderr}");
+}

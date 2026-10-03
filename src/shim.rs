@@ -83,6 +83,26 @@ pub fn establishes_credentials(program: &str, args: &[String]) -> bool {
     matches_any(ESTABLISHES_CREDENTIALS, program, args)
 }
 
+/// Whether this is `gh auth refresh` for github.com. Unlike `logout`, it takes
+/// no `--user`: gh documents it as acting on the active login, always.
+pub fn refreshes_active_github_login(program: &str, args: &[String]) -> bool {
+    matches_any(&[("gh", &[&["auth", "refresh"]])], program, args)
+        && hostname_flag(args).is_none_or(|host| host == "github.com")
+}
+
+fn hostname_flag(args: &[String]) -> Option<&str> {
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if let Some(host) = arg.strip_prefix("--hostname=") {
+            return Some(host);
+        }
+        if arg == "--hostname" || arg == "-h" {
+            return args.next().map(String::as_str);
+        }
+    }
+    None
+}
+
 /// The commands gitwho itself runs through a CLI to read a token or list its
 /// logins: `sources::token` and `discover`. Nothing else is ever run with
 /// `sources::FETCHING_TOKEN` set.

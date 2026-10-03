@@ -410,6 +410,33 @@ pub enum TokenError {
     },
 }
 
+/// The login gh treats as active on github.com -- what its own commands act on
+/// when no token is injected. `None` whenever gh cannot say for certain.
+pub fn gh_active_login(runner: &dyn Runner) -> Option<String> {
+    let captured = runner
+        .run(
+            "gh",
+            &[
+                "auth",
+                "status",
+                "--active",
+                "--hostname",
+                "github.com",
+                "--json",
+                "hosts",
+            ],
+        )
+        .ok()??;
+    let status: serde_json::Value = serde_json::from_str(&captured.stdout).ok()?;
+    status["hosts"]["github.com"]
+        .as_array()?
+        .iter()
+        .filter(|entry| entry["active"] == true)
+        .filter_map(|entry| entry["login"].as_str())
+        .find(|login| !login.is_empty())
+        .map(str::to_string)
+}
+
 /// The account's token, read on demand from its provider's CLI.
 ///
 /// Never falls back: a CLI that cannot answer is an error, because anything

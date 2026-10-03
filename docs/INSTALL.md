@@ -331,6 +331,12 @@ is the one thing that must not be blocked by it.
 Clearing still happens. Stepping aside means injecting nothing, not letting a
 token the shell already exported reach a tool that would authenticate as it.
 
+**`gh auth refresh` changes gh's active login, not the directory's.** It has
+no `--user`, so with nothing injected it acts on whichever login gh itself has
+active, while `gh auth status` through the shim reports the directory's
+account. When the two differ, gitwho names both on stderr before the refresh
+starts, with the `gh auth switch` sequence that refreshes the other one.
+
 `.zshenv` looks like the right place and is not. `.zshrc` then prepends a dozen
 or more entries of its own — Homebrew among them — so anything set in `.zshenv`
 ends up buried and the real `gh` wins. Keep a copy in `.zshenv` as well, since

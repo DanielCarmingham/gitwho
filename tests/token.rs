@@ -320,3 +320,64 @@ fn the_helper_is_asked_for_the_host_in_lowercase() {
         Some("protocol=https\nhost=git.example.net\n\n")
     );
 }
+
+mod gh_active_login {
+    use super::*;
+    use gitwho::sources::gh_active_login;
+
+    const STATUS: &[&str] = &[
+        "auth",
+        "status",
+        "--active",
+        "--hostname",
+        "github.com",
+        "--json",
+        "hosts",
+    ];
+
+    fn status_replying(reply: Captured) -> MapRunner {
+        MapRunner::new(HashMap::from([(MapRunner::key("gh", STATUS), reply)]))
+    }
+
+    /// The shape gh 2.101.0 prints, with the scopes it reports.
+    #[test]
+    fn reads_the_login_gh_marks_active() {
+        let runner = status_replying(ok(
+            r#"{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"octocat","tokenSource":"keyring","scopes":"repo","gitProtocol":"https"}]}}"#,
+        ));
+
+        assert_eq!(gh_active_login(&runner).as_deref(), Some("octocat"));
+    }
+
+    /// gh reports a broken token with an empty login, and says nothing about
+    /// whose it was; a name made up from that would be worse than none.
+    #[test]
+    fn an_entry_without_a_login_is_no_answer() {
+        let runner = status_replying(ok(
+            r#"{"hosts":{"github.com":[{"state":"error","active":true,"host":"github.com","login":"","tokenSource":"keyring"}]}}"#,
+        ));
+
+        assert_eq!(gh_active_login(&runner), None);
+    }
+
+    #[test]
+    fn an_inactive_entry_is_not_the_active_login() {
+        let runner = status_replying(ok(
+            r#"{"hosts":{"github.com":[{"state":"success","active":false,"host":"github.com","login":"octocat"}]}}"#,
+        ));
+
+        assert_eq!(gh_active_login(&runner), None);
+    }
+
+    #[test]
+    fn gh_failing_or_missing_is_no_answer() {
+        let refusing = status_replying(refused("You are not logged into any GitHub hosts."));
+        assert_eq!(gh_active_login(&refusing), None);
+
+        let missing = MapRunner::new(HashMap::new()).without("gh");
+        assert_eq!(gh_active_login(&missing), None);
+
+        let garbled = status_replying(ok("not json"));
+        assert_eq!(gh_active_login(&garbled), None);
+    }
+}

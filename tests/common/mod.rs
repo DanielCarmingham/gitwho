@@ -22,6 +22,9 @@ if [ "$1" = auth ] && [ "$2" = token ]; then
   echo "no oauth token found for github.com account $login" >&2
   exit 1
 fi
+if [ "$1" = auth ] && [ "$2" = status ] && [ -f "ROOT/gh/active-status" ]; then
+  cat "ROOT/gh/active-status"; exit 0
+fi
 if [ "$1" = api ] && [ "$2" = -X ]; then
   echo "$*" > "ROOT/gh/api-args"
   if [ -n "$GH_TOKEN" ]; then echo set > "ROOT/gh/api-token"; else echo unset > "ROOT/gh/api-token"; fi
@@ -93,6 +96,15 @@ impl FakeTools {
 
     pub fn gh_login(&self, login: &str, token: &str) {
         std::fs::write(self.dir.path().join("gh").join(login), token).unwrap();
+    }
+
+    /// Make `login` the account gh's own `auth status --active` reports.
+    pub fn gh_active(&self, login: &str) {
+        let status = serde_json::json!({"hosts": {"github.com": [{
+            "state": "success", "active": true, "host": "github.com",
+            "login": login, "tokenSource": "keyring",
+        }]}});
+        std::fs::write(self.dir.path().join("gh/active-status"), status.to_string()).unwrap();
     }
 
     /// As tea 0.15.1 does, the helper answers with the first login added for a host.
