@@ -155,6 +155,12 @@ plausible wrong name is worse than no name.
 login, server and email, marking the default. Those names are what
 `--account` takes; `gitwho accounts --quiet` prints only the names.
 
+`gitwho config edit` opens `accounts.toml` in the editor git would use for a
+commit message (`GIT_EDITOR`, `core.editor`, `VISUAL`, `EDITOR`, then `vi`).
+When the editor closes it validates the file, warns if the save left it
+anything but `0600`, and says when the generated git rules need a
+`gitwho sync --write`.
+
 The credential helper refuses to write against a repository no account
 claims. The declared default would accept the write and look healthy in
 `doctor` afterwards, which is the wrong-and-quiet failure (R8) rather than a

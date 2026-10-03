@@ -187,6 +187,7 @@ gitwho init --discover <roots>   propose accounts.toml from repos on disk
 gitwho doctor        report whether the wiring is coherent (read-only)
 gitwho whoami        which account this repository resolves to, and why
 gitwho accounts      the accounts in accounts.toml; --quiet for names only
+gitwho config edit   open accounts.toml in git's editor, then validate it
 gitwho sync          regenerate the identity and credential rules
 gitwho credential    git credential helper
 gitwho exec -- cmd   run a command with exactly one account's credentials
@@ -202,7 +203,7 @@ problems, and never prints a secret value.
 
 In use on the author's machine since 2026-08-10: git identity, git credentials,
 the `gh`/`tea` shims and a wrapped MCP server all route through it, and direnv
-no longer exports a token per directory. 253 tests, clippy clean.
+no longer exports a token per directory. 261 tests, clippy clean.
 
 One gap remains there, and `doctor` reports it rather than hiding it: a shell
 rc file still exports `GITEA_TOKEN`, so interactive shells carry a copy that

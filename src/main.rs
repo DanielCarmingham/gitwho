@@ -167,6 +167,12 @@ enum Command {
         quiet: bool,
     },
 
+    /// Work with accounts.toml.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+
     /// Generate the git config that selects an identity per repository.
     ///
     /// Writes only into gitwho's own directory. Include it once from your
@@ -191,6 +197,16 @@ enum Command {
         #[command(subcommand)]
         action: ShimAction,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Open accounts.toml in the editor git uses, then check what was saved.
+    ///
+    /// The editor is git's: GIT_EDITOR, core.editor, VISUAL, EDITOR, then vi.
+    /// Once it closes, the file is validated, and if the git rules generated
+    /// from it are now out of date you are told to run `gitwho sync --write`.
+    Edit,
 }
 
 #[derive(Subcommand)]
@@ -267,6 +283,15 @@ fn main() -> ExitCode {
         },
         Command::Accounts { quiet } => match accounts(quiet) {
             Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("gitwho: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Config {
+            action: ConfigAction::Edit,
+        } => match config_edit() {
+            Ok(code) => code,
             Err(message) => {
                 eprintln!("gitwho: {message}");
                 ExitCode::FAILURE
@@ -783,6 +808,83 @@ fn accounts(quiet: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+fn config_edit() -> Result<ExitCode, String> {
+    let path = config_path()?;
+    if !path.exists() {
+        return Err(format!(
+            "{} does not exist; `gitwho init --write` creates it",
+            path.display()
+        ));
+    }
+
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let editor = gitwho::git::editor(&cwd).ok_or_else(|| {
+        format!(
+            "git has no editor to offer (set core.editor or EDITOR); edit {} directly",
+            path.display()
+        )
+    })?;
+
+    // The same invocation git uses, so an editor configured with its own
+    // arguments (`code --wait`) works here exactly as it does for a commit.
+    let status = process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$@\""))
+        .arg(&editor)
+        .arg(&path)
+        .status()
+        .map_err(|e| format!("cannot run the editor ({editor}): {e}"))?;
+    if !status.success() {
+        return Err(format!("the editor ({editor}) exited with {status}"));
+    }
+
+    warn_unless_owner_only(&path);
+
+    let config = Config::load(&path).map_err(|e| {
+        format!("{e}\nthe file was saved as written; fix it with `gitwho config edit`")
+    })?;
+    println!("{} is valid", path.display());
+
+    let plan = gitwho::sync::plan(
+        &config,
+        &path_from_env("GITWHO_GIT_DIR", "git")?,
+        &current_exe_path()?,
+    );
+    let stale = plan
+        .files
+        .iter()
+        .any(|file| std::fs::read_to_string(&file.path).ok().as_deref() != Some(&file.contents));
+    if stale {
+        println!(
+            "the generated git rules no longer match it; apply them with `gitwho sync --write`"
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// An editor that saves by writing a new file and renaming it over the old one
+/// leaves the umask's mode behind, quietly undoing `0600` on a redirect vector.
+#[cfg(unix)]
+fn warn_unless_owner_only(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    let mode = meta.permissions().mode() & 0o777;
+    if mode != 0o600 {
+        eprintln!(
+            "gitwho: warning: {} is now {mode:04o}, not 0600: whoever can write it can be \
+             handed a token; fix with chmod 600 {}",
+            path.display(),
+            path.display()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_unless_owner_only(_path: &Path) {}
 
 fn whoami(quiet: bool) -> Result<ExitCode, String> {
     let config = Config::load(&config_path()?).map_err(|e| e.to_string())?;

@@ -27,6 +27,26 @@ pub fn origin_url(dir: &Path) -> Option<String> {
     (!url.is_empty()).then_some(url)
 }
 
+/// The editor git would open for a commit message, as a shell fragment.
+///
+/// Asking git applies its whole chain -- `GIT_EDITOR`, `core.editor`,
+/// `VISUAL`, `EDITOR`, then `vi` -- and refuses on a dumb terminal with
+/// nothing configured, which is the one case this returns `None`.
+pub fn editor(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["var", "GIT_EDITOR"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let editor = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!editor.is_empty()).then_some(editor)
+}
+
 /// The `credential.helper` values that are actually in effect.
 ///
 /// Empty values are not helpers -- they clear everything configured before
