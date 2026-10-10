@@ -4,7 +4,7 @@
 //! the answers match the git that is actually installed, including its own
 //! config resolution rules, which is the thing being reasoned about here.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The `origin` remote's URL for the repo containing `dir`, or `None` when
@@ -90,6 +90,37 @@ pub fn use_http_path_for_github() -> Option<bool> {
         "https://github.com",
     ]);
     values.first().map(|v| v == "true")
+}
+
+/// Every file the global config includes unconditionally, nested includes
+/// followed and `~` expanded -- however and wherever the line was written.
+///
+/// Run from the filesystem root so that no `includeIf` matches: a rule that
+/// applies only inside some repository is not wiring for every repository.
+pub fn global_includes() -> Vec<PathBuf> {
+    let Ok(output) = Command::new("git")
+        .args([
+            "config",
+            "--global",
+            "--includes",
+            "--type=path",
+            "--get-all",
+            "include.path",
+        ])
+        .current_dir("/")
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 fn config_values(args: &[&str]) -> Vec<String> {

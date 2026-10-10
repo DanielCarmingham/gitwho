@@ -23,14 +23,15 @@ use std::path::Path;
 pub struct Snippet {
     /// The exact text to append, newline-terminated.
     pub text: String,
-    /// The distinctive substring whose presence anywhere in the file means this
+    /// Distinctive substrings, any one of which anywhere in the file means this
     /// is already wired.
     ///
-    /// Always an absolute path, which is what makes it distinctive: two installs
-    /// pointing at different store directories are genuinely different wiring,
-    /// and a temp-directory test run must not mistake the real machine's line
-    /// for its own.
-    pub marker: String,
+    /// Each names one specific directory, which is what makes it distinctive:
+    /// two installs pointing at different store directories are genuinely
+    /// different wiring, and a temp-directory test run must not mistake the
+    /// real machine's line for its own. A `$HOME`-relative spelling stays
+    /// specific because the file it is found in sits in that same HOME.
+    pub markers: Vec<String>,
     /// What this line is for, in a few words, for the report.
     pub purpose: &'static str,
 }
@@ -38,15 +39,25 @@ pub struct Snippet {
 impl Snippet {
     /// The one line that connects your gitconfig to everything gitwho
     /// generates -- identity rules and credential sections alike.
-    pub fn gitconfig_include(includes: &Path) -> Snippet {
-        let path = includes.display().to_string();
+    ///
+    /// Written as `~/...` when the file is under `home`: git expands a leading
+    /// `~` in `include.path`, though not `$HOME`.
+    pub fn gitconfig_include(includes: &Path, home: &Path) -> Snippet {
+        let absolute = includes.display().to_string();
+        let (path, markers) = match relative_to(includes, home) {
+            Some(relative) => {
+                let path = format!("~/{relative}");
+                (path.clone(), vec![absolute, path])
+            }
+            None => (absolute.clone(), vec![absolute]),
+        };
         Snippet {
             text: format!(
                 "\n# Added by `gitwho init`. Identity and credential rules,\n\
                  # generated from ~/.config/gitwho/accounts.toml.\n\
                  [include]\n\tpath = {path}\n"
             ),
-            marker: path,
+            markers,
             purpose: "identity and credential rules",
         }
     }
@@ -56,22 +67,46 @@ impl Snippet {
     /// This belongs at the **end** of `~/.zshrc`, not in `~/.zshenv`. `.zshrc`
     /// prepends a dozen or more entries of its own -- Homebrew among them --
     /// so anything set in `.zshenv` ends up buried and the real binary wins.
-    pub fn path_export(shim_dir: &Path) -> Snippet {
-        let path = shim_dir.display().to_string();
+    ///
+    /// A shim directory under `home` is written as `$HOME/...`, so an rc file
+    /// kept in a dotfiles repo does not carry one machine's username, and is
+    /// recognised however HOME was spelled when someone wrote it by hand.
+    pub fn path_export(shim_dir: &Path, home: &Path) -> Snippet {
+        let absolute = shim_dir.display().to_string();
+        let (path, markers) = match relative_to(shim_dir, home) {
+            Some(relative) => {
+                let path = format!("$HOME/{relative}");
+                let markers = vec![
+                    absolute,
+                    path.clone(),
+                    format!("${{HOME}}/{relative}"),
+                    format!("~/{relative}"),
+                ];
+                (path, markers)
+            }
+            None => (absolute.clone(), vec![absolute]),
+        };
         Snippet {
             text: format!(
                 "\n# Added by `gitwho init`. Must stay ahead of the real gh/tea,\n\
                  # so keep it at the end of this file.\n\
                  export PATH=\"{path}:$PATH\"\n"
             ),
-            marker: path,
+            markers,
             purpose: "shims ahead of the real CLIs on PATH",
         }
     }
 
     pub fn is_present_in(&self, contents: &str) -> bool {
-        contents.contains(&self.marker)
+        self.markers
+            .iter()
+            .any(|marker| contents.contains(marker.as_str()))
     }
+}
+
+fn relative_to(path: &Path, home: &Path) -> Option<String> {
+    let relative = path.strip_prefix(home).ok()?;
+    (!relative.as_os_str().is_empty()).then(|| relative.display().to_string())
 }
 
 /// What `ensure` did, or would have done.

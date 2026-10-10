@@ -5,38 +5,57 @@ use gitwho::init::{self, Applied, Snippet};
 mod common;
 use common::FakeTools;
 
-fn includes() -> &'static Path {
-    Path::new("/home/someone/.config/gitwho/git/includes.gitconfig")
+fn home() -> &'static Path {
+    Path::new("/home/someone")
+}
+
+fn includes() -> Snippet {
+    Snippet::gitconfig_include(
+        Path::new("/home/someone/.config/gitwho/git/includes.gitconfig"),
+        home(),
+    )
 }
 
 #[test]
 fn the_gitconfig_snippet_is_an_include_naming_the_generated_file() {
-    let snippet = Snippet::gitconfig_include(includes());
+    let snippet = includes();
 
     assert!(snippet.text.contains("[include]"));
-    assert!(snippet
-        .text
-        .contains("/home/someone/.config/gitwho/git/includes.gitconfig"));
+    assert!(
+        snippet
+            .text
+            .contains("path = ~/.config/gitwho/git/includes.gitconfig"),
+        "git expands a leading ~ in include.path, so no username is needed; got: {}",
+        snippet.text
+    );
+    assert!(
+        !snippet.text.contains("/home/someone"),
+        "got: {}",
+        snippet.text
+    );
 }
 
 /// The point of a marker is that it survives reformatting. Someone who pasted
 /// the line by hand, or let an editor reindent it, must not get a second copy.
 #[test]
 fn an_include_added_by_hand_counts_as_already_present() {
-    let snippet = Snippet::gitconfig_include(includes());
+    let snippet = includes();
 
-    let hand_written =
-        "[include]\n    path = /home/someone/.config/gitwho/git/includes.gitconfig\n";
-
-    assert!(
-        snippet.is_present_in(hand_written),
-        "a hand-written include of the same file must not be duplicated"
-    );
+    for hand_written in [
+        "[include]\n    path = /home/someone/.config/gitwho/git/includes.gitconfig\n",
+        "[include]\n    path = ~/.config/gitwho/git/includes.gitconfig\n",
+        "[include]\n\tpath = \"~/.config/gitwho/git/includes.gitconfig\"\n",
+    ] {
+        assert!(
+            snippet.is_present_in(hand_written),
+            "a hand-written include of the same file must not be duplicated: {hand_written}"
+        );
+    }
 }
 
 #[test]
 fn an_unrelated_gitconfig_does_not_count_as_wired() {
-    let snippet = Snippet::gitconfig_include(includes());
+    let snippet = includes();
 
     let other = "[include]\n\tpath = ~/.gitconfig-common\n[user]\n\temail = you@example.com\n";
 
@@ -48,20 +67,37 @@ fn an_unrelated_gitconfig_does_not_count_as_wired() {
 /// see the real machine's wiring as already done.
 #[test]
 fn a_different_store_directory_is_not_the_same_wiring() {
-    let snippet = Snippet::gitconfig_include(includes());
+    let snippet = includes();
     let elsewhere = "[include]\n\tpath = /tmp/other/git/includes.gitconfig\n";
 
     assert!(!snippet.is_present_in(elsewhere));
 }
 
 #[test]
-fn the_path_snippet_prepends_the_shim_directory() {
-    let snippet = Snippet::path_export(Path::new("/home/someone/.local/share/gitwho/shims"));
+fn a_store_outside_home_is_included_by_its_full_path() {
+    let snippet = Snippet::gitconfig_include(Path::new("/opt/gitwho/includes.gitconfig"), home());
 
     assert!(
         snippet
             .text
-            .contains("/home/someone/.local/share/gitwho/shims:$PATH"),
+            .contains("path = /opt/gitwho/includes.gitconfig"),
+        "got: {}",
+        snippet.text
+    );
+}
+
+fn default_shims() -> Snippet {
+    Snippet::path_export(Path::new("/home/someone/.local/share/gitwho/shims"), home())
+}
+
+#[test]
+fn the_path_snippet_prepends_the_shim_directory() {
+    let snippet = default_shims();
+
+    assert!(
+        snippet
+            .text
+            .contains("\"$HOME/.local/share/gitwho/shims:$PATH\""),
         "the shim dir must come first, or the real gh wins; got: {}",
         snippet.text
     );
@@ -75,13 +111,66 @@ fn the_path_snippet_prepends_the_shim_directory() {
     );
 }
 
+/// A dotfiles repo shared across machines cannot carry `/Users/<name>`, so the
+/// line gitwho writes must not either.
+#[test]
+fn the_path_snippet_does_not_spell_out_the_home_directory() {
+    let snippet = default_shims();
+
+    assert!(
+        !snippet.text.contains("/home/someone"),
+        "got: {}",
+        snippet.text
+    );
+}
+
+/// The duplicate that prompted this: a line written by hand, or by an older
+/// gitwho, names the same directory through a different spelling of HOME.
+#[test]
+fn a_path_line_naming_home_any_common_way_counts_as_already_present() {
+    let snippet = default_shims();
+
+    for line in [
+        "export PATH=\"/home/someone/.local/share/gitwho/shims:$PATH\"\n",
+        "export PATH=\"$HOME/.local/share/gitwho/shims:$PATH\"\n",
+        "export PATH=\"${HOME}/.local/share/gitwho/shims:$PATH\"\n",
+        "export PATH=~/.local/share/gitwho/shims:$PATH\n",
+        "path=($HOME/.local/share/gitwho/shims $path)\n",
+    ] {
+        assert!(
+            snippet.is_present_in(line),
+            "must not be duplicated: {line}"
+        );
+    }
+}
+
+#[test]
+fn a_path_line_for_another_directory_under_home_is_not_the_same_wiring() {
+    let snippet = default_shims();
+
+    assert!(!snippet.is_present_in("export PATH=\"$HOME/.local/bin:$PATH\"\n"));
+}
+
+/// `--shim-dir` can point anywhere; there is no `$HOME` form to write then.
+#[test]
+fn a_shim_directory_outside_home_is_written_as_is() {
+    let snippet = Snippet::path_export(Path::new("/opt/shims"), home());
+
+    assert!(
+        snippet.text.contains("\"/opt/shims:$PATH\""),
+        "got: {}",
+        snippet.text
+    );
+    assert!(snippet.is_present_in("export PATH=\"/opt/shims:$PATH\"\n"));
+}
+
 #[test]
 fn ensure_reports_what_it_would_do_without_writing() {
     let dir = tempfile::tempdir().unwrap();
     let rc = dir.path().join(".zshrc");
     std::fs::write(&rc, "# existing content\n").unwrap();
 
-    let snippet = Snippet::path_export(Path::new("/opt/shims"));
+    let snippet = Snippet::path_export(Path::new("/opt/shims"), home());
     let applied = init::ensure(&rc, &snippet, false).unwrap();
 
     assert_eq!(applied, Applied::WouldAppend);
@@ -98,7 +187,7 @@ fn ensure_appends_once_and_then_says_so() {
     let rc = dir.path().join(".zshrc");
     std::fs::write(&rc, "# existing content\n").unwrap();
 
-    let snippet = Snippet::path_export(Path::new("/opt/shims"));
+    let snippet = Snippet::path_export(Path::new("/opt/shims"), home());
 
     assert_eq!(
         init::ensure(&rc, &snippet, true).unwrap(),
@@ -128,7 +217,7 @@ fn ensure_separates_itself_from_a_file_with_no_trailing_newline() {
     let rc = dir.path().join(".zshrc");
     std::fs::write(&rc, "alias foo=bar").unwrap();
 
-    let snippet = Snippet::path_export(Path::new("/opt/shims"));
+    let snippet = Snippet::path_export(Path::new("/opt/shims"), home());
     init::ensure(&rc, &snippet, true).unwrap();
 
     let after = std::fs::read_to_string(&rc).unwrap();
@@ -146,7 +235,7 @@ fn a_missing_file_is_reported_rather_than_created() {
     let dir = tempfile::tempdir().unwrap();
     let rc = dir.path().join(".zshrc");
 
-    let snippet = Snippet::path_export(Path::new("/opt/shims"));
+    let snippet = Snippet::path_export(Path::new("/opt/shims"), home());
     let applied = init::ensure(&rc, &snippet, true).unwrap();
 
     assert_eq!(applied, Applied::FileMissing);
@@ -180,6 +269,10 @@ fn gitwho(home: &Path, args: &[&str], path: &str) -> std::process::Output {
         // silently used the real store would be both wrong and dangerous.
         .env_remove("GITWHO_CONFIG")
         .env_remove("GITWHO_GIT_DIR")
+        // Either one points git's global config away from the fake HOME, and
+        // `init` asks git whether that config already includes the rules.
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("XDG_CONFIG_HOME")
         .output()
         .unwrap()
 }
@@ -292,29 +385,7 @@ fn a_completed_setup_re_runs_without_duplicating_anything() {
     let home = fresh_home();
     let path = std::env::var("PATH").unwrap_or_default();
     gitwho(home.path(), &["init", "--write"], &path);
-
-    // Replace the template with a real config, as the printed instructions say.
-    std::fs::write(
-        home.path().join(".config/gitwho/accounts.toml"),
-        r#"
-[defaults]
-account = "Personal"
-gitName = "Test Person"
-
-[[accounts]]
-name = "Personal"
-provider = "github"
-login = "someone"
-email = "you@example.com"
-match = ["github.com/someone/**"]
-"#,
-    )
-    .unwrap();
-
-    // gh needs to hold the login the config declares, which is step 2 of the
-    // instructions `init` prints. Without it `doctor` fails, correctly.
-    let fakes = FakeTools::new();
-    fakes.gh_login("someone", "fake-token");
+    let fakes = complete_setup(home.path());
 
     let first = gitwho(home.path(), &["init", "--write"], &fakes.path());
     assert!(
@@ -349,6 +420,88 @@ match = ["github.com/someone/**"]
         zshrc,
         "the shell rc must be byte-identical after a second run"
     );
+}
+
+#[test]
+fn a_shim_path_line_already_written_with_home_is_not_added_again() {
+    let home = fresh_home();
+    let zshrc = "export PATH=\"$HOME/.local/share/gitwho/shims:$PATH\"\n";
+    std::fs::write(home.path().join(".zshrc"), zshrc).unwrap();
+    gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
+    let fakes = complete_setup(home.path());
+
+    let out = gitwho(home.path(), &["init", "--write"], &fakes.path());
+
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(".zshrc")).unwrap(),
+        zshrc,
+        "report was:\n{}",
+        stdout(&out)
+    );
+}
+
+/// A gitconfig kept in a dotfiles repo often delegates to a shared file, so the
+/// include can sit one file down and be spelled with `~`. git follows it, and
+/// so must the check.
+#[test]
+fn an_include_reached_through_another_included_file_is_not_added_again() {
+    let home = fresh_home();
+    let gitconfig = "[include]\n\tpath = ~/.gitconfig-common\n";
+    std::fs::write(home.path().join(".gitconfig"), gitconfig).unwrap();
+    std::fs::write(
+        home.path().join(".gitconfig-common"),
+        "[include]\n    path = ~/.config/gitwho/git/includes.gitconfig\n",
+    )
+    .unwrap();
+    gitwho(
+        home.path(),
+        &["init", "--write"],
+        &std::env::var("PATH").unwrap_or_default(),
+    );
+    let fakes = complete_setup(home.path());
+
+    let out = gitwho(home.path(), &["init", "--write"], &fakes.path());
+    let text = stdout(&out);
+
+    assert_eq!(
+        std::fs::read_to_string(home.path().join(".gitconfig")).unwrap(),
+        gitconfig,
+        "report was:\n{text}"
+    );
+    assert!(
+        text.contains("identity and credential rules"),
+        "the step must still be reported; got:\n{text}"
+    );
+}
+
+/// Steps 1 and 2 of what `init` asks of you: a real config in place of the
+/// template, and gh logged in as the login it declares. Without the second,
+/// `doctor` fails, correctly.
+fn complete_setup(home: &Path) -> FakeTools {
+    std::fs::write(
+        home.join(".config/gitwho/accounts.toml"),
+        r#"
+[defaults]
+account = "Personal"
+gitName = "Test Person"
+
+[[accounts]]
+name = "Personal"
+provider = "github"
+login = "someone"
+email = "you@example.com"
+match = ["github.com/someone/**"]
+"#,
+    )
+    .unwrap();
+
+    let fakes = FakeTools::new();
+    fakes.gh_login("someone", "fake-token");
+    fakes
 }
 
 /// The dist shell installer writes its receipt to

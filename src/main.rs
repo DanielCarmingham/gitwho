@@ -503,8 +503,19 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
 
     // --- 4. the one line in your gitconfig ----------------------------------
     let includes = git_dir.join("includes.gitconfig");
-    let snippet = gitwho::init::Snippet::gitconfig_include(&includes);
-    report_snippet(&gitconfig_path()?, &snippet, write)?;
+    let snippet = gitwho::init::Snippet::gitconfig_include(&includes, &home_dir()?);
+    let gitconfig = gitconfig_path()?;
+    if gitwho::git::global_includes()
+        .iter()
+        .any(|included| same_file(included, &includes))
+    {
+        step(
+            "ok",
+            format!("{} ({})", gitconfig.display(), snippet.purpose),
+        );
+    } else {
+        report_snippet(&gitconfig, &snippet, write)?;
+    }
 
     // --- 5. the shims -------------------------------------------------------
     let path_var = std::env::var("PATH").unwrap_or_default();
@@ -531,7 +542,7 @@ fn init(write: bool, shim_dir: Option<PathBuf>, shims: &[String]) -> Result<Exit
 
     // --- 6. the line that puts them ahead of the real ones ------------------
     if installed_any {
-        let snippet = gitwho::init::Snippet::path_export(&shim_dir);
+        let snippet = gitwho::init::Snippet::path_export(&shim_dir, &home_dir()?);
         report_snippet(&shell_rc_path()?, &snippet, write)?;
     }
 
@@ -633,6 +644,11 @@ fn gitconfig_path() -> Result<PathBuf, String> {
         return Ok(xdg);
     }
     Ok(home.join(".gitconfig"))
+}
+
+/// Symlinked dotfiles are common, so the same file can be named two ways.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// The rc file a shim `PATH` line belongs in.
